@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Regenerate src/ui/demo-trace.ts, the measured trace the idle chart draws.
+"""Regenerate the built-in example: the audio the page offers to play, and the trace the
+idle chart draws from it. Both come from one degradation so the chart is a preview of the
+clip you can actually hear.
 
 Degrades dry speech with pink noise and optionally a synthetic room, runs it through the
 model via reference_dereverb.py, and writes both level envelopes as a small TypeScript
@@ -9,6 +11,7 @@ module. The idle chart is therefore a real measurement rather than a drawing.
 """
 import argparse
 import pathlib
+import subprocess
 
 import numpy as np
 import onnxruntime as ort
@@ -49,9 +52,9 @@ def envelope(samples: np.ndarray, buckets: int) -> np.ndarray:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("speech", help="dry 48 kHz mono speech")
-    parser.add_argument("--noise-snr", type=float, default=6.0, help="dB; use inf for none")
-    parser.add_argument("--rt60", type=float, default=0.4, help="0 disables the room")
-    parser.add_argument("--drr", type=float, default=6.0, help="direct-to-reverberant ratio, dB")
+    parser.add_argument("--noise-snr", type=float, default=8.0, help="dB; use inf for none")
+    parser.add_argument("--rt60", type=float, default=0.7, help="0 disables the room")
+    parser.add_argument("--drr", type=float, default=0.0, help="direct-to-reverberant ratio, dB")
     parser.add_argument("--seconds", type=float, default=9.0)
     parser.add_argument("--skip", type=float, default=0.4, help="seconds to trim from the start")
     args = parser.parse_args()
@@ -86,6 +89,19 @@ def main() -> None:
     dry = envelope(processed[start:stop], BUCKETS)
     peak = room.max()
     room, dry = room / peak, dry / peak
+
+    # The audio the page plays is exactly the clip these envelopes were measured from.
+    example_dir = ROOT / "public/example"
+    example_dir.mkdir(parents=True, exist_ok=True)
+    raw = example_dir / "example.wav"
+    sf.write(raw, degraded[start:stop].astype(np.float32), rate, subtype="PCM_16")
+    mp3 = example_dir / "example.mp3"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-ac", "1", "-b:a", "128k", str(mp3)],
+        check=True,
+    )
+    raw.unlink()
+    print(f"wrote {mp3} ({mp3.stat().st_size // 1024} kB)")
 
     trim = lambda x: (f"{x:.3f}".rstrip("0").rstrip(".") or "0")
     pack = lambda values: ",".join(trim(v) for v in values)

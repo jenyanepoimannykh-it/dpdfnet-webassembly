@@ -29,53 +29,79 @@
         </p>
       </section>
 
-      <section class="panel" id="panel" aria-labelledby="panel-title">
-        <div class="panel__head">
-          <h2 class="panel__title" id="panel-title">Noise floor</h2>
-          <p class="panel__reading" id="panel-reading">Example: 9 s of speech under room noise</p>
-        </div>
-
-        <div class="panel__frame">
-          <canvas class="panel__canvas" id="plot-canvas"></canvas>
-        </div>
-
-        <div class="panel__gauges">
-          <div class="stat stat--idle" id="stat">
-            <span class="stat__value" id="stat-value"></span>
-            <span class="stat__unit" id="stat-unit">Waiting for a file</span>
+      <section class="rack" id="panel">
+        <article class="module" id="module-dereverb">
+          <header class="module__head">
+            <span class="module__index">1</span>
+            <h2 class="module__title">Dereverb</h2>
+            <label class="switch">
+              <input type="checkbox" id="dereverb-on" checked />
+              <span>On</span>
+            </label>
+            <p class="module__reading">Weighted prediction error, no model</p>
+          </header>
+          <div class="module__frame">
+            <canvas class="module__canvas" id="dereverb-canvas"></canvas>
           </div>
-
-          <div class="knob" id="knob">
-            <div class="knob__dial">
-              <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                <path
-                  class="knob__track"
-                  d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87"
-                  pathLength="100"
-                />
-                <path
-                  class="knob__arc"
-                  id="knob-arc"
-                  d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87"
-                  pathLength="100"
-                />
-              </svg>
-              <span class="knob__value" id="knob-value">100%</span>
-              <input
-                class="knob__input"
-                type="range"
-                id="mix-slider"
-                min="0"
-                max="100"
-                step="1"
-                value="100"
-                aria-label="Mix"
-                disabled
-              />
+          <div class="module__gauges">
+            <div class="stat stat--idle" id="dereverb-stat">
+              <span class="stat__value" id="dereverb-value"></span>
+              <span class="stat__unit" id="dereverb-unit">Waiting for a file</span>
             </div>
-            <span class="knob__label">Mix</span>
+            <div class="knob" id="dereverb-knob">
+              <div class="knob__dial">
+                <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                  <path class="knob__track" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
+                  <path class="knob__arc" id="dereverb-arc" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
+                </svg>
+                <span class="knob__value" id="dereverb-knob-value">60%</span>
+                <input class="knob__input" type="range" id="dereverb-amount" min="0" max="100" step="1" value="60" aria-label="Dereverb amount" disabled />
+              </div>
+              <span class="knob__label">Amount</span>
+            </div>
           </div>
-        </div>
+          <p class="module__note">
+            Fits a filter to the reverberation and subtracts it. Helps a boomy room by a
+            decibel or two and costs a little on a recording that has no room to remove, so
+            it is the one stage worth switching off.
+          </p>
+        </article>
+
+        <article class="module" id="module-denoise">
+          <header class="module__head">
+            <span class="module__index">2</span>
+            <h2 class="module__title">Denoise</h2>
+            <label class="switch">
+              <input type="checkbox" id="denoise-on" checked />
+              <span>On</span>
+            </label>
+            <p class="module__reading">DPDFNet-8, 48 kHz</p>
+          </header>
+          <div class="module__frame">
+            <canvas class="module__canvas" id="denoise-canvas"></canvas>
+          </div>
+          <div class="module__gauges">
+            <div class="stat stat--idle" id="denoise-stat">
+              <span class="stat__value" id="denoise-value"></span>
+              <span class="stat__unit" id="denoise-unit">Waiting for a file</span>
+            </div>
+            <div class="knob" id="denoise-knob">
+              <div class="knob__dial">
+                <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                  <path class="knob__track" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
+                  <path class="knob__arc" id="denoise-arc" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
+                </svg>
+                <span class="knob__value" id="denoise-knob-value">100%</span>
+                <input class="knob__input" type="range" id="denoise-mix" min="0" max="100" step="1" value="100" aria-label="Denoise mix" disabled />
+              </div>
+              <span class="knob__label">Mix</span>
+            </div>
+          </div>
+          <p class="module__note">
+            The neural stage. Recovers 8 to 15&nbsp;dB on speech buried in noise, most of it
+            where the input is worst.
+          </p>
+        </article>
 
         <p class="status" id="engine-status"><span class="status__lamp"></span>Model not loaded</p>
       </section>
@@ -87,10 +113,7 @@
               <input type="file" id="file-input" accept="audio/*,video/*" />
               <span class="filepick__button">Choose a file</span>
             </label>
-            <label class="check">
-              <span>Model</span>
-              <select id="model-select"></select>
-            </label>
+            <button class="button" id="example-button" type="button">Play the example</button>
             <label class="check">
               <input type="checkbox" id="stereo-check" />
               <span>Keep both channels</span>
@@ -99,9 +122,8 @@
           <p class="stage__note">
             Or drop one anywhere on this page. Video files are read for their sound and come
             back as a WAV. Stereo is summed to mono unless you ask otherwise — it halves the
-            work and speech loses nothing. The larger model is worth about a third of a
-            decibel over the standard one, so reach for it only if you are chasing the last
-            of it.
+            work and speech loses nothing. The example is nine seconds of speech recorded
+            under room noise, the same clip the charts above are drawn from.
           </p>
         </div>
 
@@ -115,6 +137,10 @@
           <div class="stage__row">
             <button class="button button--primary" id="play-button" type="button">Play</button>
             <span class="clock" id="transport-time">0:00 / 0:00</span>
+            <label class="check">
+              <input type="checkbox" id="bypass-check" />
+              <span>Hear the original</span>
+            </label>
           </div>
           <div class="stage__row stage__row--split">
             <button class="button button--primary" id="download-button" type="button">
@@ -152,8 +178,8 @@
           back onto the video it came from.
         </p>
         <p>
-          The first visit downloads the model weights and keeps them in the browser's cache,
-          so later visits start straight away.
+          The first visit downloads about 15&nbsp;MB of model weights and keeps them in the
+          browser's cache, so later visits start straight away.
         </p>
         <p class="notes__credit">
           DPDFNet is © CEVA,&nbsp;Inc., released under the Apache&nbsp;License&nbsp;2.0. ONNX

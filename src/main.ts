@@ -1,15 +1,14 @@
 import './styles.css'
 import { decodeFile, DecodeError, downmixToMono } from './audio/decode'
-import { blend, levelDifferenceDb } from './audio/blend'
+import { blend, floorDifferenceDb } from './audio/blend'
 import { encodeWav, type WavBitDepth } from './audio/wav'
 import { Player } from './audio/player'
-import { defaultModelId, findModel, modelChoices } from './models'
-import { Plot } from './ui/plot'
-import { Knob } from './ui/knob'
+import { model } from './models'
+import { RackModule } from './ui/module'
 import { formatChannels, formatClock, formatSpeed } from './ui/format'
 import type { WorkerRequest, WorkerResponse } from './worker/protocol'
 
-const modelSampleRate = 48000
+const modelSampleRate = model.sampleRate
 
 const element = <T extends HTMLElement>(id: string): T => {
   const found = document.getElementById(id)
@@ -19,23 +18,14 @@ const element = <T extends HTMLElement>(id: string): T => {
 
 const dom = {
   engineStatus: element('engine-status'),
-  plotCanvas: element<HTMLCanvasElement>('plot-canvas'),
-  panelReading: element('panel-reading'),
-  stat: element('stat'),
-  statValue: element('stat-value'),
-  statUnit: element('stat-unit'),
-  knob: element('knob'),
-  knobArc: document.getElementById('knob-arc') as unknown as SVGPathElement,
-  knobValue: element('knob-value'),
-  mixSlider: element<HTMLInputElement>('mix-slider'),
   readout: element<HTMLDListElement>('file-readout'),
   stagePick: element('stage-pick'),
   stageBusy: element('stage-busy'),
   stageDone: element('stage-done'),
   fileInput: element<HTMLInputElement>('file-input'),
   filepickButton: element('file-input').nextElementSibling as HTMLElement,
+  exampleButton: element<HTMLButtonElement>('example-button'),
   stereoCheck: element<HTMLInputElement>('stereo-check'),
-  modelSelect: element<HTMLSelectElement>('model-select'),
   progressFill: element('progress-fill'),
   progressLabel: element('progress-label'),
   cancelButton: element<HTMLButtonElement>('cancel-button'),
@@ -44,26 +34,56 @@ const dom = {
   downloadButton: element<HTMLButtonElement>('download-button'),
   depthSelect: element<HTMLSelectElement>('depth-select'),
   resetButton: element<HTMLButtonElement>('reset-button'),
+  bypassCheck: element<HTMLInputElement>('bypass-check'),
   alert: element('alert'),
   dropveil: element('dropveil'),
 }
 
+const dereverb = new RackModule({
+  root: 'module-dereverb',
+  canvas: 'dereverb-canvas',
+  stat: 'dereverb-stat',
+  value: 'dereverb-value',
+  unit: 'dereverb-unit',
+  knob: 'dereverb-knob',
+  arc: 'dereverb-arc',
+  knobValue: 'dereverb-knob-value',
+  input: 'dereverb-amount',
+  toggle: 'dereverb-on',
+})
+
+const denoise = new RackModule({
+  root: 'module-denoise',
+  canvas: 'denoise-canvas',
+  stat: 'denoise-stat',
+  value: 'denoise-value',
+  unit: 'denoise-unit',
+  knob: 'denoise-knob',
+  arc: 'denoise-arc',
+  knobValue: 'denoise-knob-value',
+  input: 'denoise-mix',
+  toggle: 'denoise-on',
+})
+
+const player = new Player()
+
 interface Result {
   readonly name: string
   readonly dry: Float32Array[]
-  readonly wet: Float32Array[]
+  /** Output of stage one, and the input stage two was given. */
+  readonly dereverbed: Float32Array[]
+  readonly denoised: Float32Array[]
   readonly sampleRate: number
 }
 
-const plot = new Plot(dom.plotCanvas)
-const player = new Player()
-const knob = new Knob(dom.knob, dom.mixSlider, dom.knobArc, dom.knobValue)
-
 let result: Result | null = null
 let worker: Worker | null = null
-let loadedModel: string | null = null
+let modelReady = false
 let currentJob = 0
+let currentSource = 0
+let sourceSent = false
 let frameHandle = 0
+let rerunHandle = 0
 
 // --- worker --------------------------------------------------------------
 
@@ -88,27 +108,29 @@ function handle(message: WorkerResponse): void {
   switch (message.type) {
     case 'model-progress': {
       const share = message.loadedBytes / message.totalBytes
-      setProgress(share * 0.25, `Downloading the model, ${Math.round(share * 100)}%`)
+      setProgress(share * 0.2, `Downloading the model, ${Math.round(share * 100)}%`)
       break
     }
     case 'ready': {
-      loadedModel = message.model
+      modelReady = true
       dom.engineStatus.classList.add('status--live')
-      setStatus(`${findModel(message.model).name.toUpperCase()} · 48 kHz · runs on your machine`)
+      setStatus(`${model.name.toUpperCase()} · 48 kHz · runs on your machine`)
       break
     }
     case 'process-progress': {
       if (message.job !== currentJob) return
-      const share = message.processedSeconds / Math.max(message.totalSeconds, 1e-6)
+      const label = message.stage === 'dereverb' ? 'Removing the room' : 'Removing the noise'
+      const base = message.stage === 'dereverb' ? 0.2 : 0.35
+      const width = message.stage === 'dereverb' ? 0.15 : 0.65
       setProgress(
-        0.25 + share * 0.75,
-        `Removing the noise, ${Math.round(share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
+        base + message.share * width,
+        `${label}, ${Math.round(message.share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
       )
       break
     }
     case 'processed': {
       if (message.job !== currentJob) return
-      finish(message.channels, message.elapsedMs)
+      finish(message.dereverbed, message.denoised, message.elapsedMs)
       break
     }
     case 'cancelled': {
@@ -144,7 +166,7 @@ function setProgress(share: number, label: string): void {
 function fail(message: string): void {
   dom.alert.hidden = false
   dom.alert.textContent = message
-  show(result?.wet.length ? 'done' : 'pick')
+  show(result ? 'done' : 'pick')
 }
 
 function clearAlert(): void {
@@ -156,17 +178,16 @@ async function load(file: File): Promise<void> {
   clearAlert()
   player.dispose()
   result = null
-  plot.clear()
-  knob.setEnabled(false)
-  dom.stat.classList.add('stat--idle')
-  dom.statUnit.textContent = 'Waiting for a file'
+  dereverb.clear()
+  denoise.clear()
   dom.readout.replaceChildren()
   currentJob += 1
+  currentSource += 1
+  sourceSent = false
   const job = currentJob
 
   show('busy')
   setProgress(0.02, 'Reading the file')
-  dom.panelReading.textContent = file.name
 
   let decoded
   try {
@@ -182,31 +203,57 @@ async function load(file: File): Promise<void> {
       ? downmixToMono(decoded.channels)
       : decoded.channels
 
-  const model = dom.modelSelect.value
-  const ready = loadedModel === model
-  setProgress(ready ? 0.25 : 0.05, ready ? 'Removing the noise' : 'Loading the model')
-  result = { name: file.name, dry: channels.map((c) => c.slice()), wet: [], sampleRate: modelSampleRate }
-  send(
-    { type: 'process', job, model, channels, sampleRate: modelSampleRate },
-    channels.map((channel) => channel.buffer),
-  )
+  pendingName = file.name
+  pendingDry = channels.map((channel) => channel.slice())
+  run(channels)
 }
 
-function finish(wet: Float32Array[], elapsedMs: number): void {
-  if (!result) return
-  result = { ...result, wet }
-  const seconds = result.dry[0].length / result.sampleRate
-  const removed = levelDifferenceDb(result.dry, wet)
+let pendingName = ''
+let pendingDry: Float32Array[] = []
 
-  plot.showAudio({ dry: result.dry, wet, sampleRate: result.sampleRate })
-  dom.panelReading.textContent = `${result.name}, ${formatClock(seconds)}`
-  dom.stat.classList.remove('stat--idle')
-  dom.statValue.textContent = Math.abs(removed).toFixed(1)
-  dom.statUnit.textContent = removed <= 0 ? 'dB removed' : 'dB added'
+/** Sends a run to the worker. Channels travel only the first time for a given source. */
+function run(channels: Float32Array[] | null): void {
+  currentJob += 1
+  show('busy')
+  setProgress(modelReady ? 0.2 : 0.05, modelReady ? 'Removing the room' : 'Loading the model')
+  const transfer = channels ? channels.map((channel) => channel.buffer) : []
+  send(
+    {
+      type: 'process',
+      job: currentJob,
+      source: currentSource,
+      channels,
+      sampleRate: modelSampleRate,
+      dereverb: { enabled: dereverb.enabled, amount: dereverb.amount },
+      denoise: denoise.enabled,
+    },
+    transfer,
+  )
+  sourceSent = true
+}
+
+function finish(dereverbed: Float32Array[], denoised: Float32Array[], elapsedMs: number): void {
+  const dry = pendingDry
+  if (dry.length === 0) return
+  result = { name: pendingName, dry, dereverbed, denoised, sampleRate: modelSampleRate }
+  const seconds = dry[0].length / modelSampleRate
+
+  // Each module plots what it did: the stage's own input as the filled envelope, its own
+  // output as the trace. Read down the rack and you follow the signal.
+  dereverb.show(
+    { dry, wet: dereverbed, sampleRate: modelSampleRate },
+    floorDifferenceDb(dry, dereverbed, modelSampleRate),
+  )
+  denoise.show(
+    { dry: dereverbed, wet: denoised, sampleRate: modelSampleRate },
+    floorDifferenceDb(dereverbed, denoised, modelSampleRate),
+  )
+
   dom.readout.replaceChildren(
     ...(
       [
-        ['Channels', formatChannels(result.dry.length)],
+        ['File', `${pendingName}, ${formatClock(seconds)}`],
+        ['Channels', formatChannels(dry.length)],
         ['Rate', '48 kHz'],
         ['Took', `${(elapsedMs / 1000).toFixed(1)} s, ${formatSpeed(seconds, elapsedMs)}`],
       ] as const
@@ -222,31 +269,38 @@ function finish(wet: Float32Array[], elapsedMs: number): void {
   )
 
   if (import.meta.env.DEV) {
-    // Handle for the numerical comparison against the NumPy reference in scripts/;
-    // the branch and its contents are stripped from production builds.
+    // Handle for the numerical comparison in scripts/; stripped from production builds.
     ;(window as unknown as { deadroom?: unknown }).deadroom = result
   }
 
-  knob.setEnabled(true)
-  player.load(result.dry, wet, result.sampleRate)
-  player.setMix(knob.fraction)
+  player.load(dry, dereverbed, denoised, modelSampleRate)
+  player.setMix(denoise.enabled ? denoise.amount : 0)
+  player.setBypassed(dom.bypassCheck.checked)
   show('done')
   dom.playButton.focus()
 }
 
 function reset(): void {
   player.dispose()
+  dom.bypassCheck.checked = false
   result = null
+  pendingDry = []
   currentJob += 1
-  plot.clear()
+  currentSource += 1
+  sourceSent = false
+  dereverb.clear()
+  denoise.clear()
   clearAlert()
-  knob.setEnabled(false)
-  dom.stat.classList.add('stat--idle')
-  dom.statUnit.textContent = 'Waiting for a file'
-  dom.panelReading.textContent = 'Example: 9 s of speech under room noise'
   dom.readout.replaceChildren()
   dom.fileInput.value = ''
   show('pick')
+}
+
+/** Stage one's settings change what stage two is given, so they need another run. */
+function scheduleRerun(): void {
+  if (pendingDry.length === 0) return
+  window.clearTimeout(rerunHandle)
+  rerunHandle = window.setTimeout(() => run(sourceSent ? null : pendingDry), 400)
 }
 
 // --- transport -----------------------------------------------------------
@@ -254,7 +308,8 @@ function reset(): void {
 player.subscribe((state) => {
   dom.playButton.textContent = state.playing ? 'Pause' : 'Play'
   dom.transportTime.textContent = `${formatClock(state.currentTime)} / ${formatClock(state.duration)}`
-  plot.setPlayhead(state.currentTime)
+  dereverb.setPlayhead(state.currentTime)
+  denoise.setPlayhead(state.currentTime)
   if (state.playing && frameHandle === 0) tick()
   if (!state.playing && frameHandle !== 0) {
     cancelAnimationFrame(frameHandle)
@@ -267,50 +322,67 @@ function tick(): void {
     frameHandle = 0
     if (!player.isPlaying) return
     dom.transportTime.textContent = `${formatClock(player.currentTime)} / ${formatClock(player.duration)}`
-    plot.setPlayhead(player.currentTime)
+    dereverb.setPlayhead(player.currentTime)
+    denoise.setPlayhead(player.currentTime)
     tick()
   })
 }
 
-plot.onSeek((seconds) => {
-  if (result?.wet.length) player.seek(seconds)
-})
+for (const stage of [dereverb, denoise]) {
+  stage.plot.onSeek((seconds) => {
+    if (result) player.seek(seconds)
+  })
+}
 
-knob.onChange((fraction) => player.setMix(fraction))
+// Stage two's mix is a blend of two signals already in hand, so it is free and live.
+denoise.onAmount((amount) => player.setMix(denoise.enabled ? amount : 0))
+denoise.onToggle((enabled) => {
+  player.setMix(enabled ? denoise.amount : 0)
+  scheduleRerun()
+})
+dereverb.onAmount(scheduleRerun)
+dereverb.onToggle(scheduleRerun)
 
 // --- events --------------------------------------------------------------
 
 dom.filepickButton.addEventListener('pointerenter', warmModel)
 dom.fileInput.addEventListener('focus', warmModel)
+dom.exampleButton.addEventListener('pointerenter', warmModel)
 dom.fileInput.addEventListener('change', () => {
   const file = dom.fileInput.files?.[0]
   if (file) void load(file)
 })
 
-function warmModel(): void {
-  const model = dom.modelSelect.value
-  if (loadedModel !== model) send({ type: 'load', model })
+dom.exampleButton.addEventListener('click', () => void loadExample())
+
+async function loadExample(): Promise<void> {
+  clearAlert()
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}example/example.mp3`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const blob = await response.blob()
+    await load(new File([blob], 'example.mp3', { type: 'audio/mpeg' }))
+  } catch {
+    fail('Could not load the example. Check your connection and try again.')
+  }
 }
 
-for (const choice of modelChoices) {
-  const option = document.createElement('option')
-  option.value = choice.id
-  option.textContent = choice.label
-  option.selected = choice.id === defaultModelId
-  dom.modelSelect.append(option)
+function warmModel(): void {
+  if (!modelReady) send({ type: 'load' })
 }
-dom.modelSelect.addEventListener('change', warmModel)
 
 dom.cancelButton.addEventListener('click', () => {
   send({ type: 'cancel' })
   setProgress(0, 'Stopping')
 })
 dom.resetButton.addEventListener('click', reset)
+dom.bypassCheck.addEventListener('change', () => player.setBypassed(dom.bypassCheck.checked))
 dom.playButton.addEventListener('click', () => player.toggle())
 
 dom.downloadButton.addEventListener('click', () => {
-  if (!result?.wet.length) return
-  const wav = encodeWav(blend(result.dry, result.wet, knob.fraction), {
+  if (!result) return
+  const mix = denoise.enabled ? denoise.amount : 0
+  const wav = encodeWav(blend(result.dereverbed, result.denoised, mix), {
     sampleRate: result.sampleRate,
     bitDepth: Number(dom.depthSelect.value) as WavBitDepth,
   })
@@ -323,7 +395,7 @@ dom.downloadButton.addEventListener('click', () => {
 })
 
 document.addEventListener('keydown', (event) => {
-  if (event.code !== 'Space' || !result?.wet.length) return
+  if (event.code !== 'Space' || !result) return
   const target = event.target as HTMLElement | null
   if (target && ['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA'].includes(target.tagName)) return
   event.preventDefault()

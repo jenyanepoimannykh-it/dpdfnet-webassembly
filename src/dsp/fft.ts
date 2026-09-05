@@ -64,20 +64,34 @@ class PowerOfTwoFft {
   }
 }
 
-/** Unnormalised complex DFT of arbitrary size, in place over split real/imaginary arrays. */
+/**
+ * Unnormalised complex DFT of arbitrary size, in place over split real/imaginary arrays.
+ * Power-of-two sizes go straight through Cooley-Tukey; everything else takes the Bluestein
+ * path. The de-reverb stage runs at 512 and the network at 960, so both matter.
+ */
 export class Dft {
   readonly size: number
+  private readonly direct: PowerOfTwoFft | null = null
   private readonly convolutionSize: number
   private readonly fft: PowerOfTwoFft
-  private readonly chirpRe: Float64Array
-  private readonly chirpIm: Float64Array
-  private readonly kernelRe: Float64Array
-  private readonly kernelIm: Float64Array
-  private readonly workRe: Float64Array
-  private readonly workIm: Float64Array
+  private chirpRe: Float64Array
+  private chirpIm: Float64Array
+  private kernelRe: Float64Array
+  private kernelIm: Float64Array
+  private workRe: Float64Array
+  private workIm: Float64Array
 
   constructor(size: number) {
     this.size = size
+    if (size >= 2 && (size & (size - 1)) === 0) {
+      this.direct = new PowerOfTwoFft(size)
+      this.convolutionSize = 0
+      this.fft = this.direct
+      this.chirpRe = this.chirpIm = new Float64Array(0)
+      this.kernelRe = this.kernelIm = new Float64Array(0)
+      this.workRe = this.workIm = new Float64Array(0)
+      return
+    }
     let convolutionSize = 1
     while (convolutionSize < 2 * size - 1) convolutionSize <<= 1
     this.convolutionSize = convolutionSize
@@ -111,6 +125,10 @@ export class Dft {
   }
 
   forward(re: Float64Array, im: Float64Array): void {
+    if (this.direct) {
+      this.direct.transform(re, im)
+      return
+    }
     const { size, convolutionSize, chirpRe, chirpIm, kernelRe, kernelIm, workRe, workIm } = this
     for (let n = 0; n < size; n += 1) {
       workRe[n] = re[n] * chirpRe[n] - im[n] * chirpIm[n]

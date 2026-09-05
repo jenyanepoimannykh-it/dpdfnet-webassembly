@@ -118,57 +118,113 @@ strong {
   line-height: 1.55;
 }
 
-/* --- instrument panel ---------------------------------------------------- */
+/* --- the rack ------------------------------------------------------------ */
 
-.panel__head {
+.rack {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Two stages, each its own box, in the order the signal passes through them. The numbers
+   are the chain, not decoration. */
+.module {
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.module--off {
+  opacity: 0.45;
+}
+
+.module__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.15rem 1.5rem;
+  gap: 0.4rem 0.9rem;
   align-items: baseline;
-  justify-content: space-between;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.75rem;
 }
 
-.panel__title,
-.panel__reading {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 400;
+.module__index {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
   color: var(--dim);
-  max-width: none;
-}
-
-.panel__reading {
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
-.panel__frame {
+.module__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.module__reading {
+  margin: 0;
+  margin-left: auto;
+  color: var(--dimmer);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  max-width: none;
+}
+
+.module__frame {
   border: 1px solid var(--edge);
-  border-radius: var(--radius);
+  border-radius: 3px;
   overflow: hidden;
   background: #000;
 }
 
-.panel__canvas {
+.module__canvas {
   display: block;
   width: 100%;
-  height: clamp(180px, 26vw, 260px);
+  height: clamp(130px, 17vw, 170px);
   cursor: crosshair;
 }
 
-.panel__gauges {
+.module__gauges {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem 2.5rem;
+  gap: 1rem 2rem;
   align-items: center;
   justify-content: space-between;
-  padding-top: 1.25rem;
+  padding-top: 1rem;
+}
+
+.module__note {
+  margin: 0.9rem 0 0;
+  color: var(--dimmer);
+  font-size: 0.8125rem;
+  max-width: 58ch;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.switch input {
+  accent-color: var(--phosphor);
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
 }
 
 .stat {
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
+  gap: 0.55rem;
 }
 
 /* Idle there is no measurement to show, and a dash at display size reads as a lit bar, so
@@ -178,11 +234,11 @@ strong {
 }
 
 .stat--idle .stat__unit {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
 }
 
 .stat__value {
-  font-size: clamp(2.4rem, 7vw, 3.4rem);
+  font-size: clamp(1.9rem, 5vw, 2.5rem);
   font-weight: 500;
   line-height: 1;
   letter-spacing: -0.03em;
@@ -205,8 +261,8 @@ strong {
 
 .knob__dial {
   position: relative;
-  width: 92px;
-  height: 92px;
+  width: 76px;
+  height: 76px;
   touch-action: none;
 }
 
@@ -239,7 +295,7 @@ strong {
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
@@ -286,9 +342,8 @@ strong {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  margin: 1.25rem 0 0;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--edge);
+  margin: 0.25rem 0 0;
+  padding-top: 0;
   color: var(--dim);
   font-size: 0.8125rem;
   max-width: none;

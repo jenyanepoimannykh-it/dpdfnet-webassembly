@@ -1,9 +1,15 @@
-// Inference runs here so a long file never blocks the interface. onnxruntime-web is
-// imported inside the worker too, which keeps its ~1 MB of glue off the first paint.
+// The signal chain runs here so a long file never blocks the interface: de-reverberation
+// first, then the network. That order is deliberate — weighted prediction error fits a
+// linear model to the observed reverberation, and it wants the signal before a non-linear
+// suppressor has been near it.
+//
+// The de-reverberation fit is cached per source. Changing its blend, or switching the
+// network off, re-runs only what actually depends on the change.
 import wasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url'
 import { CancelledError, DereverbEngine } from '../dsp/dereverb'
+import { WpeDereverb } from '../dsp/wpe'
 import { modelUrls } from '../models'
-import type { WorkerRequest, WorkerResponse } from './protocol'
+import type { ProcessRequest, WorkerRequest, WorkerResponse } from './protocol'
 
 interface WorkerScope {
   postMessage(message: WorkerResponse, transfer?: Transferable[]): void
@@ -13,13 +19,12 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope
 const post = (message: WorkerResponse, transfer?: Transferable[]) => scope.postMessage(message, transfer)
 
-// Only one engine is held at a time. Both models together would sit in the WebAssembly
-// heap for the whole session, and switching is rare enough not to be worth that.
 let engine: DereverbEngine | null = null
-let engineId: string | null = null
 let loading: Promise<DereverbEngine> | null = null
-let loadingId: string | null = null
 let cancelRequested = false
+
+const wpe = new WpeDereverb()
+let cache: { source: number; dry: Float32Array[]; residual: Float32Array[] } | null = null
 
 /** Intra-op threads for the convolutions. Capped low: the graph is small and per-frame,
  *  so beyond a few threads the synchronisation costs more than it saves. */
@@ -29,91 +34,112 @@ function threadCount(): number {
   return Math.max(1, Math.min(4, cores - 1))
 }
 
-async function ensureEngine(model: string): Promise<DereverbEngine> {
-  if (engine && engineId === model) return engine
-  if (loading && loadingId === model) return loading
-
-  const previous = engine
-  engine = null
-  engineId = null
-  void previous?.release().catch(() => undefined)
-
+async function ensureEngine(): Promise<DereverbEngine> {
+  if (engine) return engine
+  if (loading) return loading
   const startedAt = performance.now()
-  loadingId = model
   loading = DereverbEngine.load({
-    ...modelUrls(model),
+    ...modelUrls(),
     wasmBinaryUrl,
     numThreads: threadCount(),
     onModelProgress: (loadedBytes, totalBytes) =>
       post({ type: 'model-progress', loadedBytes, totalBytes }),
   }).then((loaded) => {
     engine = loaded
-    engineId = model
-    post({
-      type: 'ready',
-      model,
-      metadata: loaded.metadata,
-      loadMs: performance.now() - startedAt,
-    })
+    post({ type: 'ready', loadMs: performance.now() - startedAt })
     return loaded
   })
   return loading
 }
 
-async function process(request: ProcessRequestLike): Promise<void> {
-  const active = await ensureEngine(request.model)
-  if (cancelRequested) throw new CancelledError()
-  const { hopSize, sampleRate } = active.metadata
-  if (request.sampleRate !== sampleRate) {
-    throw new Error(`the model runs at ${sampleRate} Hz but received ${request.sampleRate} Hz`)
-  }
-  const totalSeconds = (request.channels.length * request.channels[0].length) / sampleRate
-  const startedAt = performance.now()
-  let secondsBefore = 0
-  let lastPost = 0
+function blend(dry: Float32Array, wet: Float32Array, amount: number): Float32Array {
+  if (amount >= 1) return wet.slice()
+  if (amount <= 0) return dry.slice()
+  const out = new Float32Array(dry.length)
+  for (let i = 0; i < dry.length; i += 1) out[i] = dry[i] + amount * (wet[i] - dry[i])
+  return out
+}
 
-  const wet: Float32Array[] = []
-  const reduction: Float32Array[] = []
-  for (const channel of request.channels) {
-    const result = await active.processChannel(channel, {
-      shouldCancel: () => cancelRequested,
-      onProgress: ({ frame, totalFrames }) => {
-        const now = performance.now()
-        if (frame !== totalFrames && now - lastPost < 100) return
-        lastPost = now
-        post({
-          type: 'process-progress',
-          job: request.job,
-          processedSeconds: secondsBefore + (Math.min(frame, totalFrames) * hopSize) / sampleRate,
-          totalSeconds,
-          elapsedMs: now - startedAt,
-        })
-      },
+async function process(request: ProcessRequest): Promise<void> {
+  if (request.channels) {
+    cache = { source: request.source, dry: request.channels, residual: [] }
+  }
+  if (!cache || cache.source !== request.source) {
+    throw new Error('the worker no longer holds that audio; load the file again')
+  }
+  const dry = cache.dry
+  const sampleRate = request.sampleRate
+  const totalSeconds = dry.reduce((sum, channel) => sum + channel.length / sampleRate, 0)
+  const startedAt = performance.now()
+  let lastPost = 0
+  const report = (stage: 'dereverb' | 'denoise', done: number) => {
+    const now = performance.now()
+    if (now - lastPost < 100) return
+    lastPost = now
+    post({
+      type: 'process-progress',
+      job: request.job,
+      stage,
+      share: Math.min(1, done / Math.max(totalSeconds, 1e-6)),
+      processedSeconds: done,
+      elapsedMs: now - startedAt,
     })
-    // subarray shares the padded buffer; slice so only the audible span is transferred.
-    wet.push(result.wet.slice())
-    reduction.push(result.reductionDb)
-    secondsBefore += channel.length / sampleRate
+  }
+
+  if (request.dereverb.enabled && cache.residual.length === 0) {
+    let done = 0
+    const residual: Float32Array[] = []
+    for (const channel of dry) {
+      const seconds = channel.length / sampleRate
+      const result = wpe.process(channel, {
+        sampleRate,
+        shouldCancel: () => cancelRequested,
+        onProgress: (frame, frames) => report('dereverb', done + (frame / frames) * seconds),
+      })
+      residual.push(result.residual.slice())
+      done += seconds
+    }
+    cache.residual = residual
+  }
+  if (cancelRequested) throw new CancelledError()
+
+  const dereverbed =
+    request.dereverb.enabled && cache.residual.length > 0
+      ? dry.map((channel, index) => blend(channel, cache!.residual[index], request.dereverb.amount))
+      : dry.map((channel) => channel.slice())
+
+  let denoised: Float32Array[]
+  if (request.denoise) {
+    const active = await ensureEngine()
+    if (active.metadata.sampleRate !== sampleRate) {
+      throw new Error(`the model runs at ${active.metadata.sampleRate} Hz but received ${sampleRate} Hz`)
+    }
+    denoised = []
+    let done = 0
+    for (const channel of dereverbed) {
+      const seconds = channel.length / sampleRate
+      const result = await active.processChannel(channel, {
+        shouldCancel: () => cancelRequested,
+        onProgress: ({ frame, totalFrames }) =>
+          report('denoise', done + (frame / totalFrames) * seconds),
+      })
+      denoised.push(result.wet.slice())
+      done += seconds
+    }
+  } else {
+    denoised = dereverbed.map((channel) => channel.slice())
   }
 
   post(
     {
       type: 'processed',
       job: request.job,
-      channels: wet,
-      reductionDb: reduction,
-      hopSize,
+      dereverbed,
+      denoised,
       elapsedMs: performance.now() - startedAt,
     },
-    [...wet.map((channel) => channel.buffer), ...reduction.map((channel) => channel.buffer)],
+    [...dereverbed.map((c) => c.buffer), ...denoised.map((c) => c.buffer)],
   )
-}
-
-interface ProcessRequestLike {
-  readonly job: number
-  readonly model: string
-  readonly channels: Float32Array[]
-  readonly sampleRate: number
 }
 
 scope.addEventListener('message', (event) => {
@@ -123,13 +149,16 @@ scope.addEventListener('message', (event) => {
     return
   }
   if (request.type === 'load') {
-    ensureEngine(request.model).catch((error) => post({ type: 'error', message: describe(error) }))
+    ensureEngine().catch((error) => post({ type: 'error', message: describe(error) }))
     return
   }
   cancelRequested = false
   process(request).catch((error) => {
-    if (error instanceof CancelledError) post({ type: 'cancelled', job: request.job })
-    else post({ type: 'error', message: describe(error) })
+    if (error instanceof CancelledError || describe(error) === 'cancelled') {
+      post({ type: 'cancelled', job: request.job })
+    } else {
+      post({ type: 'error', message: describe(error) })
+    }
   })
 })
 

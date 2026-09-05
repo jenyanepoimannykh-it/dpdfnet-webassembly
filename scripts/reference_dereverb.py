@@ -20,8 +20,19 @@ import onnxruntime as ort
 import soundfile as sf
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MODEL = ROOT / "public/models/dpdfnet2_48khz_hr.onnx"
-METADATA = ROOT / "public/models/dpdfnet2_48khz_hr.meta.json"
+MODEL_DIR = ROOT / "public/models"
+
+
+def _shipped_model() -> pathlib.Path:
+    """Whichever network the site ships, so this cannot drift from src/models.ts."""
+    found = sorted(MODEL_DIR.glob("*.onnx"))
+    if len(found) != 1:
+        raise SystemExit(f"expected exactly one .onnx in {MODEL_DIR}, found {len(found)}")
+    return found[0]
+
+
+MODEL = _shipped_model()
+METADATA = MODEL.with_suffix(".meta.json")
 
 
 def load_metadata() -> dict:

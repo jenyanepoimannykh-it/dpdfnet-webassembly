@@ -4,9 +4,16 @@ Neural noise removal for voice, running entirely in the browser. Drop in audio o
 [DPDFNet](https://github.com/ceva-ip/DPDFNet) lifts the voice out from under the noise, and
 you get a 48 kHz WAV back. No upload, no server, no account.
 
-The model is the same one embedded in the JenyaDereverb2 VST3/AU plug-in, running through
-ONNX Runtime compiled to WebAssembly. On an M-series Mac, in Chrome, on one thread:
-**5.7× faster than real time** with the standard model, 2.2× with the larger one.
+Two stages, stacked in the order the signal passes through them and each switchable on its
+own:
+
+1. **Dereverb** — weighted prediction error. A linear filter fitted to the reverberation and
+   subtracted. No model, no weights.
+2. **Denoise** — DPDFNet-8 through ONNX Runtime compiled to WebAssembly, the same network
+   embedded in the JenyaDereverb2 VST3/AU plug-in.
+
+On an M-series Mac, in Chrome, the chain runs about **2× faster than real time**; the
+de-reverberation stage alone manages 44×.
 
 ## Running it
 
@@ -22,7 +29,47 @@ that can be served from anywhere; set `BASE_PATH` if it will live in a subdirect
 BASE_PATH=/deadroom/ npm run build
 ```
 
-## How the audio path works
+## Why two stages
+
+They are good at different things, and one of them is worth switching off. SI-SDR against
+the clean source:
+
+| Condition | Input | Dereverb | Denoise | **Both** |
+|---|---|---|---|---|
+| Reverb 0.7 s | 0.48 | 1.64 | 1.45 | **2.20** |
+| Reverb 0.7 s + noise 5 dB | −1.76 | −1.23 | 1.27 | **1.65** |
+| Reverb 0.5 s + noise 10 dB | 1.95 | 2.73 | 3.48 | **4.10** |
+| Noise 5 dB, no room | 5.00 | 4.87 | **17.92** | 14.51 |
+
+De-reverberation earns its place on a room and costs 3.4 dB on material that has none, which
+is exactly why it is a stage with a switch rather than something applied silently. It
+defaults to on at 60%, which keeps most of the gain on a room and halves the loss without
+one.
+
+## Stage one: de-reverberation
+
+`src/dsp/wpe.ts`, the offline formulation published by NARA-WPE. Per bin, a filter over
+`taps` past frames — starting `delay` frames back so the direct sound and early reflections
+survive — is fitted to the observation weighted by the inverse of the current speech power,
+and the prediction is subtracted. Two passes: the first weights by the observed power, the
+second by the power of the first pass's residual.
+
+4096-point STFT, hop 1024, 12 taps, delay 2, 2 iterations, fitted in blocks of 20 s with 2 s
+of context either side. The fit only runs up to 8 kHz: reverberation energy is concentrated
+low, and stopping there is eight times cheaper than the full band while keeping 89% of the
+measured benefit. Measured on speech in an RT60 0.7 s room, it is worth **+1.23 dB** SI-SDR
+and **+1.6 dB** of speech-to-tail ratio, at 44× real time.
+
+`amount` plays no part in the fit — the residual returned is always the full one — so the
+interface re-blends the stage without re-running it.
+
+> This is **not** `OnlineWpe.cpp` from the plug-in repository. That file is a recursive
+> least-squares variant which is absent from `CMakeLists.txt` and referenced by nothing;
+> ported faithfully and measured, it made material worse (SI-SDR −13 dB, residual peaks
+> above the input). It looks like abandoned v0.2 work. The batch form above is the one WPE
+> is known for, and nothing here has to be causal anyway.
+
+## Stage two: the network
 
 `src/dsp/dereverb.ts` is a port of `NeuralEnhancer.cpp` from the plug-in:
 
@@ -105,28 +152,18 @@ given, so speech-to-tail improves by 4.9 dB at RT60 0.7 s and 6.3 dB at RT60 0.8
 readings are true; the model does audibly shorten a room, but it removes noise far better
 than it removes reflections.
 
-### The two models
+### The model
 
-The 48 kHz family has two members with an identical ONNX signature — only `state_size`
-differs (56436 against 90228) — so either is a drop-in. Both ship here; the picker defaults
-to the standard one, and the larger is fetched only if chosen.
-
-| | Params | MACs | Download | In browser | Native, 1 thread | Gain |
-|---|---|---|---|---|---|---|
-| `dpdfnet2_48khz_hr` | 2.58 M | 2.42 G | 10.5 MB | 5.7× real time | 11.0× | — |
-| `dpdfnet8_48khz_hr` | 3.63 M | 7.17 G | 14.9 MB | 2.2× real time | 3.7× | +0.1 to +0.4 dB |
-
-Three times the compute for a fraction of a decibel, which is why the interface says so
-rather than calling it "best quality".
-
-CEVA also publish 8 kHz and 16 kHz variants — `baseline` at 0.36 GMACs is seven times
-cheaper than the standard model here — which would suit weak devices or transcription prep
-at the cost of fullband quality. Not shipped.
+`dpdfnet8_48khz_hr`, the largest of the family: 3.63 M parameters, 7.17 GMACs, 14.9 MB.
+CEVA publish six others — the smaller `dpdfnet2_48khz_hr` is three times cheaper for
+0.1 to 0.4 dB less, and the 8 and 16 kHz variants trade fullband quality for speed. All
+share an identical ONNX signature, differing only in `state_size`, so swapping is a matter
+of dropping a file into `public/models/` and re-running
+`scripts/extract-model-metadata.mjs`.
 
 `dpdfnet8_48khz_hr` carries the wrong `profile` string in its own metadata (it says
-`dpdfnet2_48khz_hr`), so `src/models.ts` names models locally rather than trusting the file.
-`scripts/extract-model-metadata.mjs` regenerates the JSON sidecars for every `.onnx` in
-`public/models/`.
+`dpdfnet2_48khz_hr`), so `src/models.ts` names the model locally rather than trusting the
+file.
 
 ## Notes on the interface
 
@@ -135,14 +172,26 @@ player and the exporter. It is equivalent to upstream's `--attn-limit-db`, which
 same two spectra with `alpha = 10 ** (-dB / 20)`; a mix of *m* is an attenuation limit of
 `-20 * log10(1 - m)` dB.
 
+Each module plots what its own stage did: the stage's input as the filled envelope, its
+output as the trace. Read down the rack and you follow the signal. The number on each is the
+change in the quiet floor between words — where reverberation tails and steady noise both
+live — rather than broadband level, which barely moves when a stage works well. Both
+readings are clamped at −90 dBFS, since the network takes the gaps to digital silence and
+the unclamped ratio runs past 80 dB and says nothing.
+
+"Hear the original" bypasses both stages without moving the playhead.
+
 Stereo is summed to mono by default. Speech enhancement gains nothing from a second
 correlated channel and it doubles the work, but "Keep both channels" processes each with
 its own recurrent state.
 
-The chart plots level in dB, not amplitude. A noise floor sits 20–50 dB under the speech
-above it, so on a linear axis the whole story is a few pixels tall. The idle chart is a real
-measurement — 9 s of speech under pink noise in a small room, back through this model — not
-a drawing. Regenerate it with `scripts/make_demo_trace.py`.
+The charts plot level in dB, not amplitude. A noise floor sits 20–50 dB under the speech
+above it, so on a linear axis the whole story is a few pixels tall.
+
+**Play the example** runs the built-in clip through the real chain: 9 s of speech under pink
+noise at 8 dB SNR in an RT60 0.7 s room. It is the same audio the idle charts are drawn
+from, so the charts are a preview of the clip you can hear.
+`scripts/make_demo_trace.py` regenerates both the audio and the traces together.
 
 ## Browser support
 

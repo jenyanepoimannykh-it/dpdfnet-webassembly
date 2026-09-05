@@ -1,6 +1,7 @@
-// Both versions play from the same clock so the blend slider is a true crossfade: moving it
-// mid-sentence changes only the balance, never the position. The gain law matches what the
-// exporter writes, so what you hear is what lands in the file.
+// Every version plays from the same clock, so moving a control mid-sentence changes only
+// the balance, never the position. Three tracks are held: the original, the output of stage
+// one, and the output of stage two. The gain law matches what the exporter writes, so what
+// you hear is what lands in the file.
 
 export interface PlayerState {
   readonly playing: boolean
@@ -10,20 +11,18 @@ export interface PlayerState {
 
 export class Player {
   private context: AudioContext | null = null
-  private dryBuffer: AudioBuffer | null = null
-  private wetBuffer: AudioBuffer | null = null
-  private drySource: AudioBufferSourceNode | null = null
-  private wetSource: AudioBufferSourceNode | null = null
-  private dryGain: GainNode | null = null
-  private wetGain: GainNode | null = null
+  private buffers: AudioBuffer[] = []
+  private sources: AudioBufferSourceNode[] = []
+  private gains: GainNode[] = []
   private startedAt = 0
   private offset = 0
   private playing = false
   private mix = 1
+  private bypassed = false
   private onChange: (state: PlayerState) => void = () => {}
 
   get duration(): number {
-    return this.dryBuffer?.duration ?? 0
+    return this.buffers[0]?.duration ?? 0
   }
 
   get currentTime(): number {
@@ -39,11 +38,18 @@ export class Player {
     this.onChange = listener
   }
 
-  load(dry: readonly Float32Array[], wet: readonly Float32Array[], sampleRate: number): void {
+  /** Original, stage one's output, stage two's output. All the same length. */
+  load(
+    original: readonly Float32Array[],
+    stageOne: readonly Float32Array[],
+    stageTwo: readonly Float32Array[],
+    sampleRate: number,
+  ): void {
     this.stopSources()
     const context = this.ensureContext(sampleRate)
-    this.dryBuffer = toAudioBuffer(context, dry, sampleRate)
-    this.wetBuffer = toAudioBuffer(context, wet, sampleRate)
+    this.buffers = [original, stageOne, stageTwo].map((channels) =>
+      toAudioBuffer(context, channels, sampleRate),
+    )
     this.offset = 0
     this.playing = false
     this.emit()
@@ -51,34 +57,52 @@ export class Player {
 
   setMix(mix: number): void {
     this.mix = Math.min(1, Math.max(0, mix))
-    if (this.dryGain && this.wetGain && this.context) {
-      // A short ramp rather than a step: an abrupt gain change on a running buffer clicks.
-      const at = this.context.currentTime
-      this.dryGain.gain.setTargetAtTime(1 - this.mix, at, 0.01)
-      this.wetGain.gain.setTargetAtTime(this.mix, at, 0.01)
-    }
+    this.applyGains()
+  }
+
+  /** Monitor the untouched input, whatever the stages are set to. */
+  setBypassed(bypassed: boolean): void {
+    this.bypassed = bypassed
+    this.applyGains()
+  }
+
+  get isBypassed(): boolean {
+    return this.bypassed
+  }
+
+  private targetGains(): number[] {
+    if (this.bypassed) return [1, 0, 0]
+    return [0, 1 - this.mix, this.mix]
+  }
+
+  private applyGains(): void {
+    if (!this.context || this.gains.length === 0) return
+    // A short ramp rather than a step: an abrupt gain change on a running buffer clicks.
+    const at = this.context.currentTime
+    const targets = this.targetGains()
+    this.gains.forEach((gain, index) => gain.gain.setTargetAtTime(targets[index], at, 0.01))
   }
 
   play(): void {
-    if (this.playing || !this.dryBuffer || !this.wetBuffer) return
-    const context = this.ensureContext(this.dryBuffer.sampleRate)
+    if (this.playing || this.buffers.length === 0) return
+    const context = this.ensureContext(this.buffers[0].sampleRate)
     void context.resume()
     if (this.offset >= this.duration - 0.005) this.offset = 0
 
-    this.dryGain = context.createGain()
-    this.wetGain = context.createGain()
-    this.dryGain.gain.value = 1 - this.mix
-    this.wetGain.gain.value = this.mix
-    this.dryGain.connect(context.destination)
-    this.wetGain.connect(context.destination)
-
-    this.drySource = context.createBufferSource()
-    this.wetSource = context.createBufferSource()
-    this.drySource.buffer = this.dryBuffer
-    this.wetSource.buffer = this.wetBuffer
-    this.drySource.connect(this.dryGain)
-    this.wetSource.connect(this.wetGain)
-    this.drySource.onended = () => {
+    const targets = this.targetGains()
+    this.gains = this.buffers.map((_, index) => {
+      const gain = context.createGain()
+      gain.gain.value = targets[index]
+      gain.connect(context.destination)
+      return gain
+    })
+    this.sources = this.buffers.map((buffer, index) => {
+      const source = context.createBufferSource()
+      source.buffer = buffer
+      source.connect(this.gains[index])
+      return source
+    })
+    this.sources[0].onended = () => {
       if (!this.playing) return
       this.playing = false
       this.offset = this.duration
@@ -86,8 +110,7 @@ export class Player {
     }
 
     const at = context.currentTime + 0.02
-    this.drySource.start(at, this.offset)
-    this.wetSource.start(at, this.offset)
+    for (const source of this.sources) source.start(at, this.offset)
     this.startedAt = at
     this.playing = true
     this.emit()
@@ -120,8 +143,7 @@ export class Player {
 
   dispose(): void {
     this.stopSources()
-    this.dryBuffer = null
-    this.wetBuffer = null
+    this.buffers = []
     this.offset = 0
     this.playing = false
   }
@@ -134,8 +156,7 @@ export class Player {
   }
 
   private stopSources(): void {
-    for (const source of [this.drySource, this.wetSource]) {
-      if (!source) continue
+    for (const source of this.sources) {
       source.onended = null
       try {
         source.stop()
@@ -144,12 +165,9 @@ export class Player {
       }
       source.disconnect()
     }
-    this.drySource = null
-    this.wetSource = null
-    this.dryGain?.disconnect()
-    this.wetGain?.disconnect()
-    this.dryGain = null
-    this.wetGain = null
+    for (const gain of this.gains) gain.disconnect()
+    this.sources = []
+    this.gains = []
   }
 
   private emit(): void {
