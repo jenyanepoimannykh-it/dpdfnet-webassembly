@@ -5,6 +5,7 @@ import { encodeWav, type WavBitDepth } from './audio/wav'
 import { Player } from './audio/player'
 import { model } from './models'
 import { RackModule } from './ui/module'
+import { demoClean, demoDereverbed, demoNoisy } from './ui/demo-trace'
 import { formatChannels, formatClock, formatSpeed } from './ui/format'
 import type { WorkerRequest, WorkerResponse } from './worker/protocol'
 
@@ -50,7 +51,7 @@ const dereverb = new RackModule({
   knobValue: 'dereverb-knob-value',
   input: 'dereverb-amount',
   toggle: 'dereverb-on',
-})
+}, { before: demoNoisy, after: demoDereverbed })
 
 const denoise = new RackModule({
   root: 'module-denoise',
@@ -63,7 +64,7 @@ const denoise = new RackModule({
   knobValue: 'denoise-knob-value',
   input: 'denoise-mix',
   toggle: 'denoise-on',
-})
+}, { before: demoDereverbed, after: demoClean })
 
 const player = new Player()
 

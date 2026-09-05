@@ -7,7 +7,12 @@
 // The vertical axis is level in dB, not amplitude. A noise floor sits 20-50 dB under the
 // speech above it, so on a linear axis the whole story is a few pixels tall; in dB the gaps
 // between words open out and the horizontal grid lines read as 15 dB steps.
-import { demoClean, demoNoisy } from './demo-trace'
+
+/** Envelopes drawn before any file is loaded, in the same grammar as the live chart. */
+export interface IdleTrace {
+  readonly before: Float32Array
+  readonly after: Float32Array
+}
 
 export interface AudioView {
   readonly dry: readonly Float32Array[]
@@ -45,9 +50,11 @@ export class Plot {
   private height = 0
   private ratio = 1
   private seekListener: ((seconds: number) => void) | null = null
+  private readonly idle: IdleTrace
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, idle: IdleTrace) {
     this.canvas = canvas
+    this.idle = idle
     const context = canvas.getContext('2d')
     if (!context) throw new Error('this browser does not provide a 2D canvas context')
     this.context = context
@@ -128,7 +135,7 @@ export class Plot {
     const palette = this.palette()
     this.grid(context, palette)
     if (this.peaks) this.paint(context, palette, this.peaks.dry, this.peaks.wet)
-    else this.paint(context, palette, demoNoisy, demoClean)
+    else this.paint(context, palette, this.idle.before, this.idle.after)
     this.blit()
   }
 

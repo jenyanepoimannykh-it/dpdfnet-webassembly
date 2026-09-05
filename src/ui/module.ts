@@ -1,7 +1,7 @@
 // One box in the rack: a chart of what the stage did, a measured readout, a knob, and a
 // switch. Both stages are the same shape, so they are the same object.
 import { Knob } from './knob'
-import { Plot, type AudioView } from './plot'
+import { Plot, type AudioView, type IdleTrace } from './plot'
 
 export interface RackModuleElements {
   readonly root: string
@@ -32,14 +32,14 @@ export class RackModule {
   private readonly toggle: HTMLInputElement
   private readonly idleUnit: string
 
-  constructor(ids: RackModuleElements) {
+  constructor(ids: RackModuleElements, idle: IdleTrace) {
     this.root = element(ids.root)
     this.stat = element(ids.stat)
     this.value = element(ids.value)
     this.unit = element(ids.unit)
     this.toggle = element<HTMLInputElement>(ids.toggle)
     this.idleUnit = this.unit.textContent ?? ''
-    this.plot = new Plot(element<HTMLCanvasElement>(ids.canvas))
+    this.plot = new Plot(element<HTMLCanvasElement>(ids.canvas), idle)
     this.knob = new Knob(
       element(ids.knob),
       element<HTMLInputElement>(ids.input),
