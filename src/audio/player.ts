@@ -1,7 +1,6 @@
-// Every version plays from the same clock, so moving a control mid-sentence changes only
-// the balance, never the position. Three tracks are held: the original, the output of stage
-// one, and the output of stage two. The gain law matches what the exporter writes, so what
-// you hear is what lands in the file.
+// Both versions play from the same clock, so moving the mix mid-sentence changes only the
+// balance, never the position. The gain law matches what the exporter writes, so what you
+// hear is what lands in the file.
 
 export interface PlayerState {
   readonly playing: boolean
@@ -38,16 +37,15 @@ export class Player {
     this.onChange = listener
   }
 
-  /** Original, stage one's output, stage two's output. All the same length. */
+  /** The original and the processed result, both the same length. */
   load(
     original: readonly Float32Array[],
-    stageOne: readonly Float32Array[],
-    stageTwo: readonly Float32Array[],
+    processed: readonly Float32Array[],
     sampleRate: number,
   ): void {
     this.stopSources()
     const context = this.ensureContext(sampleRate)
-    this.buffers = [original, stageOne, stageTwo].map((channels) =>
+    this.buffers = [original, processed].map((channels) =>
       toAudioBuffer(context, channels, sampleRate),
     )
     this.offset = 0
@@ -60,7 +58,7 @@ export class Player {
     this.applyGains()
   }
 
-  /** Monitor the untouched input, whatever the stages are set to. */
+  /** Monitor the untouched input without moving the mix, so the export is unaffected. */
   setBypassed(bypassed: boolean): void {
     this.bypassed = bypassed
     this.applyGains()
@@ -71,8 +69,8 @@ export class Player {
   }
 
   private targetGains(): number[] {
-    if (this.bypassed) return [1, 0, 0]
-    return [0, 1 - this.mix, this.mix]
+    if (this.bypassed) return [1, 0]
+    return [1 - this.mix, this.mix]
   }
 
   private applyGains(): void {

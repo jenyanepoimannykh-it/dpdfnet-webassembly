@@ -30,79 +30,36 @@
       </section>
 
       <section class="rack" id="panel">
-        <article class="module" id="module-dereverb">
+        <article class="module">
           <header class="module__head">
-            <span class="module__index">1</span>
-            <h2 class="module__title">Dereverb</h2>
-            <label class="switch">
-              <input type="checkbox" id="dereverb-on" checked />
-              <span>On</span>
-            </label>
-            <p class="module__reading">Linear prediction, 12 taps</p>
-          </header>
-          <div class="module__frame">
-            <canvas class="module__canvas" id="dereverb-canvas"></canvas>
-          </div>
-          <div class="module__gauges">
-            <div class="stat stat--idle" id="dereverb-stat">
-              <span class="stat__value" id="dereverb-value"></span>
-              <span class="stat__unit" id="dereverb-unit">Waiting for a file</span>
-            </div>
-            <div class="knob" id="dereverb-knob">
-              <div class="knob__dial">
-                <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                  <path class="knob__track" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
-                  <path class="knob__arc" id="dereverb-arc" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
-                </svg>
-                <span class="knob__value" id="dereverb-knob-value">60%</span>
-                <input class="knob__input" type="range" id="dereverb-amount" min="0" max="100" step="1" value="60" aria-label="Dereverb amount" disabled />
-              </div>
-              <span class="knob__label">Amount</span>
-            </div>
-          </div>
-          <p class="module__note">
-            A filter fitted to the reverberation and subtracted — arithmetic rather than a
-            network, so there is nothing to download for this stage. Worth a decibel or two
-            on a boomy room, and it costs a little on a recording with no room to remove,
-            which makes it the one stage worth switching off. The method is called weighted
-            prediction error, after the residual it leaves behind.
-          </p>
-        </article>
-
-        <article class="module" id="module-denoise">
-          <header class="module__head">
-            <span class="module__index">2</span>
-            <h2 class="module__title">Denoise</h2>
-            <label class="switch">
-              <input type="checkbox" id="denoise-on" checked />
-              <span>On</span>
-            </label>
+            <h2 class="module__title">Noise and room</h2>
             <p class="module__reading">DPDFNet-8, 48 kHz</p>
           </header>
           <div class="module__frame">
-            <canvas class="module__canvas" id="denoise-canvas"></canvas>
+            <canvas class="module__canvas" id="stage-canvas"></canvas>
           </div>
           <div class="module__gauges">
-            <div class="stat stat--idle" id="denoise-stat">
-              <span class="stat__value" id="denoise-value"></span>
-              <span class="stat__unit" id="denoise-unit">Waiting for a file</span>
+            <div class="stat stat--idle" id="stage-stat">
+              <span class="stat__value" id="stage-value"></span>
+              <span class="stat__unit" id="stage-unit">Waiting for a file</span>
             </div>
-            <div class="knob" id="denoise-knob">
+            <div class="knob" id="stage-knob">
               <div class="knob__dial">
                 <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
                   <path class="knob__track" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
-                  <path class="knob__arc" id="denoise-arc" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
+                  <path class="knob__arc" id="stage-arc" d="M 23.13 76.87 A 38 38 0 1 1 76.87 76.87" pathLength="100" />
                 </svg>
-                <span class="knob__value" id="denoise-knob-value">100%</span>
-                <input class="knob__input" type="range" id="denoise-mix" min="0" max="100" step="1" value="100" aria-label="Denoise mix" disabled />
+                <span class="knob__value" id="stage-knob-value">100%</span>
+                <input class="knob__input" type="range" id="stage-mix" min="0" max="100" step="1" value="100" aria-label="Mix" disabled />
               </div>
               <span class="knob__label">Mix</span>
             </div>
           </div>
           <p class="module__note">
-            The neural stage. Recovers 8 to 15&nbsp;dB on speech buried in noise, most of it
-            where the input is worst. It shortens a room by about a decibel too, on its own,
-            so some de-reverberation happens here even with the stage above switched off.
+            One pass of the network. It recovers 8 to 15&nbsp;dB on speech buried in noise,
+            most of it where the input is worst, and shortens a reverberant room by about a
+            decibel on the way. Both come out of the same pass — the model was trained to do
+            them together and has no separate control for either.
           </p>
         </article>
 

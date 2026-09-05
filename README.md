@@ -4,16 +4,10 @@ Neural noise removal for voice, running entirely in the browser. Drop in audio o
 [DPDFNet](https://github.com/ceva-ip/DPDFNet) lifts the voice out from under the noise, and
 you get a 48 kHz WAV back. No upload, no server, no account.
 
-Two stages, stacked in the order the signal passes through them and each switchable on its
-own:
-
-1. **Dereverb** — weighted prediction error. A linear filter fitted to the reverberation and
-   subtracted. No model, no weights.
-2. **Denoise** — DPDFNet-8 through ONNX Runtime compiled to WebAssembly, the same network
-   embedded in the JenyaDereverb2 VST3/AU plug-in.
-
-On an M-series Mac, in Chrome, the chain runs about **2× faster than real time**; the
-de-reverberation stage alone manages 44×.
+One pass of DPDFNet-8 through ONNX Runtime compiled to WebAssembly — the same network
+embedded in the JenyaDereverb2 VST3/AU plug-in. It removes noise and about a decibel of room
+together, because that is what it was trained to do; it has no separate control for either.
+On an M-series Mac, in Chrome, it runs about **2× faster than real time** on one thread.
 
 ## Running it
 
@@ -29,47 +23,7 @@ that can be served from anywhere; set `BASE_PATH` if it will live in a subdirect
 BASE_PATH=/deadroom/ npm run build
 ```
 
-## Why two stages
-
-They are good at different things, and one of them is worth switching off. SI-SDR against
-the clean source:
-
-| Condition | Input | Dereverb | Denoise | **Both** |
-|---|---|---|---|---|
-| Reverb 0.7 s | 0.48 | 1.64 | 1.45 | **2.20** |
-| Reverb 0.7 s + noise 5 dB | −1.76 | −1.23 | 1.27 | **1.65** |
-| Reverb 0.5 s + noise 10 dB | 1.95 | 2.73 | 3.48 | **4.10** |
-| Noise 5 dB, no room | 5.00 | 4.87 | **17.92** | 14.51 |
-
-De-reverberation earns its place on a room and costs 3.4 dB on material that has none, which
-is exactly why it is a stage with a switch rather than something applied silently. It
-defaults to on at 60%, which keeps most of the gain on a room and halves the loss without
-one.
-
-## Stage one: de-reverberation
-
-`src/dsp/wpe.ts`, the offline formulation published by NARA-WPE. Per bin, a filter over
-`taps` past frames — starting `delay` frames back so the direct sound and early reflections
-survive — is fitted to the observation weighted by the inverse of the current speech power,
-and the prediction is subtracted. Two passes: the first weights by the observed power, the
-second by the power of the first pass's residual.
-
-4096-point STFT, hop 1024, 12 taps, delay 2, 2 iterations, fitted in blocks of 20 s with 2 s
-of context either side. The fit only runs up to 8 kHz: reverberation energy is concentrated
-low, and stopping there is eight times cheaper than the full band while keeping 89% of the
-measured benefit. Measured on speech in an RT60 0.7 s room, it is worth **+1.23 dB** SI-SDR
-and **+1.6 dB** of speech-to-tail ratio, at 44× real time.
-
-`amount` plays no part in the fit — the residual returned is always the full one — so the
-interface re-blends the stage without re-running it.
-
-> This is **not** `OnlineWpe.cpp` from the plug-in repository. That file is a recursive
-> least-squares variant which is absent from `CMakeLists.txt` and referenced by nothing;
-> ported faithfully and measured, it made material worse (SI-SDR −13 dB, residual peaks
-> above the input). It looks like abandoned v0.2 work. The batch form above is the one WPE
-> is known for, and nothing here has to be causal anyway.
-
-## Stage two: the network
+## How the audio path works
 
 `src/dsp/dereverb.ts` is a port of `NeuralEnhancer.cpp` from the plug-in:
 
@@ -152,6 +106,29 @@ given, so speech-to-tail improves by 4.9 dB at RT60 0.7 s and 6.3 dB at RT60 0.8
 readings are true; the model does audibly shorten a room, but it removes noise far better
 than it removes reflections.
 
+### Why there is no separate de-reverberation control
+
+DPDFNet takes one input and returns one output, with no mode switch, so the only way to
+"use it for de-reverberation" is to run it twice. Measured, a second pass is worth **+0.03
+dB** and costs a whole extra pass:
+
+| Condition | Input | One pass | Two passes |
+|---|---|---|---|
+| Reverb 0.7 s | 0.48 | 1.45 | 1.48 |
+| Reverb 0.7 s + noise 5 dB | −1.76 | 1.27 | 1.28 |
+| Reverb 0.5 s + noise 10 dB | 1.95 | 3.48 | 3.49 |
+| Noise 5 dB, no room | 5.00 | 17.92 | 17.67 |
+
+It is a masking suppressor: after one pass the reverberation it knows how to attenuate is
+already attenuated, and feeding it its own output gives it nothing new. `voice-enh` reached
+the same conclusion independently — "one restrained noise-suppression pass; no second cleanup
+pass, preserving a stable natural floor".
+
+An earlier build put a linear de-reverberation stage (weighted prediction error) in front of
+the network, which was worth about +0.6 dB more on a reverberant room but cost 3.4 dB on
+material with no room to remove. It was dropped in favour of one honest box. It is in the
+git history if it is ever wanted back.
+
 ### The model
 
 `dpdfnet8_48khz_hr`, the largest of the family: 3.63 M parameters, 7.17 GMACs, 14.9 MB.
@@ -172,26 +149,28 @@ player and the exporter. It is equivalent to upstream's `--attn-limit-db`, which
 same two spectra with `alpha = 10 ** (-dB / 20)`; a mix of *m* is an attenuation limit of
 `-20 * log10(1 - m)` dB.
 
-Each module plots what its own stage did: the stage's input as the filled envelope, its
-output as the trace. Read down the rack and you follow the signal. The number on each is the
-change in the quiet floor between words — where reverberation tails and steady noise both
-live — rather than broadband level, which barely moves when a stage works well. Both
-readings are clamped at −90 dBFS, since the network takes the gaps to digital silence and
-the unclamped ratio runs past 80 dB and says nothing.
+The chart plots what the pass did: the input as the filled envelope, the output as the
+trace. What still shows through the fill is what came out. The number beside it is the change
+in the quiet floor between words — where reverberation tails and steady noise both live —
+rather than broadband level, which barely moves when the model works well: speech dominates
+the average, and speech is what it is trying to keep. It is clamped at −90 dBFS, since the
+network takes the gaps to digital silence and the unclamped ratio runs past 80 dB and says
+nothing.
 
-"Hear the original" bypasses both stages without moving the playhead.
+"Hear the original" monitors the untouched input without moving the mix, so it never changes
+what gets exported.
 
 Stereo is summed to mono by default. Speech enhancement gains nothing from a second
 correlated channel and it doubles the work, but "Keep both channels" processes each with
 its own recurrent state.
 
-The charts plot level in dB, not amplitude. A noise floor sits 20–50 dB under the speech
+The chart plots level in dB, not amplitude. A noise floor sits 20–50 dB under the speech
 above it, so on a linear axis the whole story is a few pixels tall.
 
-**Play the example** runs the built-in clip through the real chain: 9 s of speech under pink
-noise at 8 dB SNR in an RT60 0.7 s room. It is the same audio the idle charts are drawn
-from, so the charts are a preview of the clip you can hear.
-`scripts/make_demo_trace.py` regenerates both the audio and the traces together.
+**Play the example** runs the built-in clip through the real model: 9 s of speech under pink
+noise at 8 dB SNR in an RT60 0.7 s room. It is the same audio the idle chart is drawn from,
+so the chart is a preview of the clip you can hear. `scripts/make_demo_trace.py` regenerates
+both the audio and the trace together.
 
 ## Browser support
 

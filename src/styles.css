@@ -125,16 +125,10 @@ strong {
   gap: 1rem;
 }
 
-/* Two stages, each its own box, in the order the signal passes through them. The numbers
-   are the chain, not decoration. */
 .module {
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   padding: 1rem 1.1rem 1.15rem;
-}
-
-.module--off {
-  opacity: 0.45;
 }
 
 .module__head {
@@ -143,20 +137,6 @@ strong {
   gap: 0.4rem 0.9rem;
   align-items: baseline;
   padding-bottom: 0.75rem;
-}
-
-.module__index {
-  width: 1.4rem;
-  height: 1.4rem;
-  flex: none;
-  align-self: center;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--edge);
-  border-radius: 50%;
-  color: var(--dim);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .module__title {
@@ -203,22 +183,6 @@ strong {
   color: var(--dimmer);
   font-size: 0.8125rem;
   max-width: 58ch;
-}
-
-.switch {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--dim);
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.switch input {
-  accent-color: var(--phosphor);
-  width: 0.95rem;
-  height: 0.95rem;
-  margin: 0;
 }
 
 .stat {

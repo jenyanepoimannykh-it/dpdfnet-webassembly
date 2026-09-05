@@ -4,8 +4,8 @@ import { blend, floorDifferenceDb } from './audio/blend'
 import { encodeWav, type WavBitDepth } from './audio/wav'
 import { Player } from './audio/player'
 import { model } from './models'
-import { RackModule } from './ui/module'
-import { demoClean, demoDereverbed, demoNoisy } from './ui/demo-trace'
+import { Stage } from './ui/stage'
+import { demoClean, demoNoisy } from './ui/demo-trace'
 import { formatChannels, formatClock, formatSpeed } from './ui/format'
 import type { WorkerRequest, WorkerResponse } from './worker/protocol'
 
@@ -40,40 +40,26 @@ const dom = {
   dropveil: element('dropveil'),
 }
 
-const dereverb = new RackModule({
-  root: 'module-dereverb',
-  canvas: 'dereverb-canvas',
-  stat: 'dereverb-stat',
-  value: 'dereverb-value',
-  unit: 'dereverb-unit',
-  knob: 'dereverb-knob',
-  arc: 'dereverb-arc',
-  knobValue: 'dereverb-knob-value',
-  input: 'dereverb-amount',
-  toggle: 'dereverb-on',
-}, { before: demoNoisy, after: demoDereverbed })
-
-const denoise = new RackModule({
-  root: 'module-denoise',
-  canvas: 'denoise-canvas',
-  stat: 'denoise-stat',
-  value: 'denoise-value',
-  unit: 'denoise-unit',
-  knob: 'denoise-knob',
-  arc: 'denoise-arc',
-  knobValue: 'denoise-knob-value',
-  input: 'denoise-mix',
-  toggle: 'denoise-on',
-}, { before: demoDereverbed, after: demoClean })
+const stage = new Stage(
+  {
+    canvas: 'stage-canvas',
+    stat: 'stage-stat',
+    value: 'stage-value',
+    unit: 'stage-unit',
+    knob: 'stage-knob',
+    arc: 'stage-arc',
+    knobValue: 'stage-knob-value',
+    input: 'stage-mix',
+  },
+  { before: demoNoisy, after: demoClean },
+)
 
 const player = new Player()
 
 interface Result {
   readonly name: string
   readonly dry: Float32Array[]
-  /** Output of stage one, and the input stage two was given. */
-  readonly dereverbed: Float32Array[]
-  readonly denoised: Float32Array[]
+  readonly wet: Float32Array[]
   readonly sampleRate: number
 }
 
@@ -81,10 +67,7 @@ let result: Result | null = null
 let worker: Worker | null = null
 let modelReady = false
 let currentJob = 0
-let currentSource = 0
-let sourceSent = false
 let frameHandle = 0
-let rerunHandle = 0
 
 // --- worker --------------------------------------------------------------
 
@@ -120,18 +103,15 @@ function handle(message: WorkerResponse): void {
     }
     case 'process-progress': {
       if (message.job !== currentJob) return
-      const label = message.stage === 'dereverb' ? 'Removing the room' : 'Removing the noise'
-      const base = message.stage === 'dereverb' ? 0.2 : 0.35
-      const width = message.stage === 'dereverb' ? 0.15 : 0.65
       setProgress(
-        base + message.share * width,
-        `${label}, ${Math.round(message.share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
+        0.2 + message.share * 0.8,
+        `Cleaning up, ${Math.round(message.share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
       )
       break
     }
     case 'processed': {
       if (message.job !== currentJob) return
-      finish(message.dereverbed, message.denoised, message.elapsedMs)
+      finish(message.channels, message.elapsedMs)
       break
     }
     case 'cancelled': {
@@ -179,12 +159,9 @@ async function load(file: File): Promise<void> {
   clearAlert()
   player.dispose()
   result = null
-  dereverb.clear()
-  denoise.clear()
+  stage.clear()
   dom.readout.replaceChildren()
   currentJob += 1
-  currentSource += 1
-  sourceSent = false
   const job = currentJob
 
   show('busy')
@@ -206,48 +183,27 @@ async function load(file: File): Promise<void> {
 
   pendingName = file.name
   pendingDry = channels.map((channel) => channel.slice())
-  run(channels)
+  setProgress(modelReady ? 0.2 : 0.05, modelReady ? 'Cleaning up' : 'Loading the model')
+  send(
+    { type: 'process', job, channels, sampleRate: modelSampleRate },
+    channels.map((channel) => channel.buffer),
+  )
 }
 
 let pendingName = ''
 let pendingDry: Float32Array[] = []
 
-/** Sends a run to the worker. Channels travel only the first time for a given source. */
-function run(channels: Float32Array[] | null): void {
-  currentJob += 1
-  show('busy')
-  setProgress(modelReady ? 0.2 : 0.05, modelReady ? 'Removing the room' : 'Loading the model')
-  const transfer = channels ? channels.map((channel) => channel.buffer) : []
-  send(
-    {
-      type: 'process',
-      job: currentJob,
-      source: currentSource,
-      channels,
-      sampleRate: modelSampleRate,
-      dereverb: { enabled: dereverb.enabled, amount: dereverb.amount },
-      denoise: denoise.enabled,
-    },
-    transfer,
-  )
-  sourceSent = true
-}
-
-function finish(dereverbed: Float32Array[], denoised: Float32Array[], elapsedMs: number): void {
+function finish(wet: Float32Array[], elapsedMs: number): void {
   const dry = pendingDry
   if (dry.length === 0) return
-  result = { name: pendingName, dry, dereverbed, denoised, sampleRate: modelSampleRate }
+  result = { name: pendingName, dry, wet, sampleRate: modelSampleRate }
   const seconds = dry[0].length / modelSampleRate
 
-  // Each module plots what it did: the stage's own input as the filled envelope, its own
-  // output as the trace. Read down the rack and you follow the signal.
-  dereverb.show(
-    { dry, wet: dereverbed, sampleRate: modelSampleRate },
-    floorDifferenceDb(dry, dereverbed, modelSampleRate),
-  )
-  denoise.show(
-    { dry: dereverbed, wet: denoised, sampleRate: modelSampleRate },
-    floorDifferenceDb(dereverbed, denoised, modelSampleRate),
+  // The chart plots what the pass did: the input as the filled envelope, the output as the
+  // trace. What still shows through the fill is what came out.
+  stage.show(
+    { dry, wet, sampleRate: modelSampleRate },
+    floorDifferenceDb(dry, wet, modelSampleRate),
   )
 
   dom.readout.replaceChildren(
@@ -274,8 +230,8 @@ function finish(dereverbed: Float32Array[], denoised: Float32Array[], elapsedMs:
     ;(window as unknown as { deadroom?: unknown }).deadroom = result
   }
 
-  player.load(dry, dereverbed, denoised, modelSampleRate)
-  player.setMix(denoise.enabled ? denoise.amount : 0)
+  player.load(dry, wet, modelSampleRate)
+  player.setMix(stage.amount)
   player.setBypassed(dom.bypassCheck.checked)
   show('done')
   dom.playButton.focus()
@@ -287,21 +243,11 @@ function reset(): void {
   result = null
   pendingDry = []
   currentJob += 1
-  currentSource += 1
-  sourceSent = false
-  dereverb.clear()
-  denoise.clear()
+  stage.clear()
   clearAlert()
   dom.readout.replaceChildren()
   dom.fileInput.value = ''
   show('pick')
-}
-
-/** Stage one's settings change what stage two is given, so they need another run. */
-function scheduleRerun(): void {
-  if (pendingDry.length === 0) return
-  window.clearTimeout(rerunHandle)
-  rerunHandle = window.setTimeout(() => run(sourceSent ? null : pendingDry), 400)
 }
 
 // --- transport -----------------------------------------------------------
@@ -309,8 +255,7 @@ function scheduleRerun(): void {
 player.subscribe((state) => {
   dom.playButton.textContent = state.playing ? 'Pause' : 'Play'
   dom.transportTime.textContent = `${formatClock(state.currentTime)} / ${formatClock(state.duration)}`
-  dereverb.setPlayhead(state.currentTime)
-  denoise.setPlayhead(state.currentTime)
+  stage.setPlayhead(state.currentTime)
   if (state.playing && frameHandle === 0) tick()
   if (!state.playing && frameHandle !== 0) {
     cancelAnimationFrame(frameHandle)
@@ -323,26 +268,17 @@ function tick(): void {
     frameHandle = 0
     if (!player.isPlaying) return
     dom.transportTime.textContent = `${formatClock(player.currentTime)} / ${formatClock(player.duration)}`
-    dereverb.setPlayhead(player.currentTime)
-    denoise.setPlayhead(player.currentTime)
+    stage.setPlayhead(player.currentTime)
     tick()
   })
 }
 
-for (const stage of [dereverb, denoise]) {
-  stage.plot.onSeek((seconds) => {
-    if (result) player.seek(seconds)
-  })
-}
-
-// Stage two's mix is a blend of two signals already in hand, so it is free and live.
-denoise.onAmount((amount) => player.setMix(denoise.enabled ? amount : 0))
-denoise.onToggle((enabled) => {
-  player.setMix(enabled ? denoise.amount : 0)
-  scheduleRerun()
+stage.plot.onSeek((seconds) => {
+  if (result) player.seek(seconds)
 })
-dereverb.onAmount(scheduleRerun)
-dereverb.onToggle(scheduleRerun)
+
+// The mix is a blend of two signals already in hand, so it is free and live.
+stage.onAmount((amount) => player.setMix(amount))
 
 // --- events --------------------------------------------------------------
 
@@ -382,8 +318,7 @@ dom.playButton.addEventListener('click', () => player.toggle())
 
 dom.downloadButton.addEventListener('click', () => {
   if (!result) return
-  const mix = denoise.enabled ? denoise.amount : 0
-  const wav = encodeWav(blend(result.dereverbed, result.denoised, mix), {
+  const wav = encodeWav(blend(result.dry, result.wet, stage.amount), {
     sampleRate: result.sampleRate,
     bitDepth: Number(dom.depthSelect.value) as WavBitDepth,
   })

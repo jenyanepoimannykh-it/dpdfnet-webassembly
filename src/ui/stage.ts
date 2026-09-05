@@ -1,10 +1,8 @@
-// One box in the rack: a chart of what the stage did, a measured readout, a knob, and a
-// switch. Both stages are the same shape, so they are the same object.
+// The processing box: a chart of what the model did, a measured readout, and a mix knob.
 import { Knob } from './knob'
 import { Plot, type AudioView, type IdleTrace } from './plot'
 
-export interface RackModuleElements {
-  readonly root: string
+export interface StageElements {
   readonly canvas: string
   readonly stat: string
   readonly value: string
@@ -13,7 +11,6 @@ export interface RackModuleElements {
   readonly arc: string
   readonly knobValue: string
   readonly input: string
-  readonly toggle: string
 }
 
 const element = <T extends HTMLElement>(id: string): T => {
@@ -22,22 +19,18 @@ const element = <T extends HTMLElement>(id: string): T => {
   return found as T
 }
 
-export class RackModule {
+export class Stage {
   readonly plot: Plot
   readonly knob: Knob
-  private readonly root: HTMLElement
   private readonly stat: HTMLElement
   private readonly value: HTMLElement
   private readonly unit: HTMLElement
-  private readonly toggle: HTMLInputElement
   private readonly idleUnit: string
 
-  constructor(ids: RackModuleElements, idle: IdleTrace) {
-    this.root = element(ids.root)
+  constructor(ids: StageElements, idle: IdleTrace) {
     this.stat = element(ids.stat)
     this.value = element(ids.value)
     this.unit = element(ids.unit)
-    this.toggle = element<HTMLInputElement>(ids.toggle)
     this.idleUnit = this.unit.textContent ?? ''
     this.plot = new Plot(element<HTMLCanvasElement>(ids.canvas), idle)
     this.knob = new Knob(
@@ -46,29 +39,17 @@ export class RackModule {
       document.getElementById(ids.arc) as unknown as SVGPathElement,
       element(ids.knobValue),
     )
-    this.root.classList.toggle('module--off', !this.toggle.checked)
-  }
-
-  get enabled(): boolean {
-    return this.toggle.checked
   }
 
   get amount(): number {
     return this.knob.fraction
   }
 
-  onToggle(listener: (enabled: boolean) => void): void {
-    this.toggle.addEventListener('change', () => {
-      this.root.classList.toggle('module--off', !this.toggle.checked)
-      listener(this.toggle.checked)
-    })
-  }
-
   onAmount(listener: (amount: number) => void): void {
     this.knob.onChange(listener)
   }
 
-  /** `removedDb` is negative where the stage took energy out. */
+  /** `removedDb` is negative where the model took energy out. */
   show(view: AudioView, removedDb: number): void {
     this.plot.showAudio(view)
     this.knob.setEnabled(true)
