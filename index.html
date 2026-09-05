@@ -38,7 +38,7 @@
               <input type="checkbox" id="dereverb-on" checked />
               <span>On</span>
             </label>
-            <p class="module__reading">Weighted prediction error, no model</p>
+            <p class="module__reading">Weighted prediction error, 12 taps</p>
           </header>
           <div class="module__frame">
             <canvas class="module__canvas" id="dereverb-canvas"></canvas>
@@ -61,9 +61,10 @@
             </div>
           </div>
           <p class="module__note">
-            Fits a filter to the reverberation and subtracts it. Helps a boomy room by a
-            decibel or two and costs a little on a recording that has no room to remove, so
-            it is the one stage worth switching off.
+            A filter fitted to the reverberation and subtracted — arithmetic rather than a
+            network, so there is nothing to download for this stage. Worth a decibel or two
+            on a boomy room, and it costs a little on a recording with no room to remove,
+            which makes it the one stage worth switching off.
           </p>
         </article>
 
