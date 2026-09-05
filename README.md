@@ -1,12 +1,12 @@
-# Deadroom
+# Hush
 
-Neural room removal for voice, running entirely in the browser. Drop in audio or video,
-[DPDFNet](https://github.com/ceva-ip/DPDFNet) removes the reverberation, and you get a
-48 kHz WAV back. No upload, no server, no account.
+Neural noise removal for voice, running entirely in the browser. Drop in audio or video,
+[DPDFNet](https://github.com/ceva-ip/DPDFNet) lifts the voice out from under the noise, and
+you get a 48 kHz WAV back. No upload, no server, no account.
 
 The model is the same one embedded in the JenyaDereverb2 VST3/AU plug-in, running through
-ONNX Runtime compiled to WebAssembly. On an M-series Mac it processes roughly **5.7× faster
-than real time** on one thread.
+ONNX Runtime compiled to WebAssembly. On an M-series Mac, in Chrome, on one thread:
+**5.7× faster than real time** with the standard model, 2.2× with the larger one.
 
 ## Running it
 
@@ -105,24 +105,28 @@ given, so speech-to-tail improves by 4.9 dB at RT60 0.7 s and 6.3 dB at RT60 0.8
 readings are true; the model does audibly shorten a room, but it removes noise far better
 than it removes reflections.
 
-### Why this build ships `dpdfnet2_48khz_hr` and not `dpdfnet8_48khz_hr`
+### The two models
 
-The 48 kHz family has two members and both have an identical ONNX signature — only
-`state_size` differs (56436 against 90228), so either is a drop-in here. Measured, the
-larger one is not worth it:
+The 48 kHz family has two members with an identical ONNX signature — only `state_size`
+differs (56436 against 90228) — so either is a drop-in. Both ship here; the picker defaults
+to the standard one, and the larger is fetched only if chosen.
 
-| | Params | MACs | Download | Speed (1 thread, native) | Best case gain |
-|---|---|---|---|---|---|
-| `dpdfnet2_48khz_hr` | 2.58 M | 2.42 G | 10.5 MB | 11.0× real time | — |
-| `dpdfnet8_48khz_hr` | 3.63 M | 7.17 G | 14.9 MB | 3.7× real time | +0.1 to +0.4 dB |
+| | Params | MACs | Download | In browser | Native, 1 thread | Gain |
+|---|---|---|---|---|---|---|
+| `dpdfnet2_48khz_hr` | 2.58 M | 2.42 G | 10.5 MB | 5.7× real time | 11.0× | — |
+| `dpdfnet8_48khz_hr` | 3.63 M | 7.17 G | 14.9 MB | 2.2× real time | 3.7× | +0.1 to +0.4 dB |
 
-Three times the compute and 4.4 MB more download for a fraction of a dB.
+Three times the compute for a fraction of a decibel, which is why the interface says so
+rather than calling it "best quality".
 
-CEVA also publish 8 kHz and 16 kHz variants (`baseline` at 0.36 GMACs is seven times cheaper
-than what ships here) which would suit weak devices or transcription prep, at the cost of
-bandwidth. Note that `dpdfnet8_48khz_hr` carries the wrong `profile` string in its metadata
-— it says `dpdfnet2_48khz_hr` — so models must be named locally rather than trusted from the
-file.
+CEVA also publish 8 kHz and 16 kHz variants — `baseline` at 0.36 GMACs is seven times
+cheaper than the standard model here — which would suit weak devices or transcription prep
+at the cost of fullband quality. Not shipped.
+
+`dpdfnet8_48khz_hr` carries the wrong `profile` string in its own metadata (it says
+`dpdfnet2_48khz_hr`), so `src/models.ts` names models locally rather than trusting the file.
+`scripts/extract-model-metadata.mjs` regenerates the JSON sidecars for every `.onnx` in
+`public/models/`.
 
 ## Notes on the interface
 
@@ -131,12 +135,14 @@ player and the exporter. It is equivalent to upstream's `--attn-limit-db`, which
 same two spectra with `alpha = 10 ** (-dB / 20)`; a mix of *m* is an attenuation limit of
 `-20 * log10(1 - m)` dB.
 
-Stereo is summed to mono by default. Speech de-reverberation gains nothing from a second
+Stereo is summed to mono by default. Speech enhancement gains nothing from a second
 correlated channel and it doubles the work, but "Keep both channels" processes each with
 its own recurrent state.
 
-The idle chart is a real measurement — 9 s of speech through a synthetic room and back
-through this model — not a drawing. Regenerate it with `scripts/make_demo_trace.py`.
+The chart plots level in dB, not amplitude. A noise floor sits 20–50 dB under the speech
+above it, so on a linear axis the whole story is a few pixels tall. The idle chart is a real
+measurement — 9 s of speech under pink noise in a small room, back through this model — not
+a drawing. Regenerate it with `scripts/make_demo_trace.py`.
 
 ## Browser support
 

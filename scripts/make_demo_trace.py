@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate src/ui/demo-trace.ts, the measured trace the idle chart draws.
 
-Convolves dry speech with a synthetic room, runs it through the model via
-reference_dereverb.py, and writes both level envelopes as a small TypeScript module. The
-idle chart is therefore a real measurement rather than a drawing.
+Degrades dry speech with pink noise and optionally a synthetic room, runs it through the
+model via reference_dereverb.py, and writes both level envelopes as a small TypeScript
+module. The idle chart is therefore a real measurement rather than a drawing.
 
     python scripts/make_demo_trace.py speech-48k-mono.wav
 """
@@ -33,6 +33,14 @@ def room_impulse(rate: int, rt60: float, drr_db: float, seed: int = 7) -> np.nda
     return tail
 
 
+def pink_noise(length: int, rng: np.random.Generator) -> np.ndarray:
+    """Roughly 1/f. Closer to room tone, fans and traffic than white noise is."""
+    spectrum = np.fft.rfft(rng.normal(size=length))
+    freqs = np.arange(len(spectrum), dtype=float)
+    freqs[0] = 1.0
+    return np.fft.irfft(spectrum / np.sqrt(freqs), n=length)
+
+
 def envelope(samples: np.ndarray, buckets: int) -> np.ndarray:
     edges = np.linspace(0, len(samples), buckets + 1).astype(int)
     return np.array([np.max(np.abs(samples[a:b])) for a, b in zip(edges, edges[1:])])
@@ -41,8 +49,9 @@ def envelope(samples: np.ndarray, buckets: int) -> np.ndarray:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("speech", help="dry 48 kHz mono speech")
-    parser.add_argument("--rt60", type=float, default=0.7)
-    parser.add_argument("--drr", type=float, default=0.0, help="direct-to-reverberant ratio, dB")
+    parser.add_argument("--noise-snr", type=float, default=6.0, help="dB; use inf for none")
+    parser.add_argument("--rt60", type=float, default=0.4, help="0 disables the room")
+    parser.add_argument("--drr", type=float, default=6.0, help="direct-to-reverberant ratio, dB")
     parser.add_argument("--seconds", type=float, default=9.0)
     parser.add_argument("--skip", type=float, default=0.4, help="seconds to trim from the start")
     args = parser.parse_args()
@@ -53,8 +62,17 @@ def main() -> None:
         raise SystemExit(f"{args.speech} is {rate} Hz; the model needs {meta['sampleRate']} Hz")
     speech = speech[:, 0]
 
-    reverberant = np.convolve(speech, room_impulse(rate, args.rt60, args.drr))[: len(speech)]
-    reverberant *= 0.35 / np.max(np.abs(reverberant))
+    rng = np.random.default_rng(3)
+    degraded = speech
+    if args.rt60 > 0:
+        degraded = np.convolve(degraded, room_impulse(rate, args.rt60, args.drr))[: len(speech)]
+    if np.isfinite(args.noise_snr):
+        noise = pink_noise(len(degraded), rng)
+        noise /= np.sqrt(np.mean(noise**2))
+        noise *= np.sqrt(np.mean(degraded**2)) / (10 ** (args.noise_snr / 20))
+        degraded = degraded + noise
+    degraded *= 0.35 / np.max(np.abs(degraded))
+    reverberant = degraded
 
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
@@ -74,19 +92,20 @@ def main() -> None:
     out = ROOT / "src/ui/demo-trace.ts"
     out.write_text(
         f"""// The idle chart is a real measurement, not an illustration. {args.seconds:.0f} seconds of speech
-// convolved with a synthetic room (RT60 {args.rt60} s, direct-to-reverberant {args.drr:+.0f} dB), then
-// run through this same model by scripts/reference_dereverb.py. Peak magnitude per bucket,
-// normalised to the reverberant peak. Regenerate with scripts/make_demo_trace.py.
+// under pink noise at {args.noise_snr:.0f} dB SNR in a small room (RT60 {args.rt60} s, direct-to-
+// reverberant {args.drr:+.0f} dB), run through this same model by scripts/reference_dereverb.py.
+// Peak magnitude per bucket, normalised to the degraded peak. Regenerate with
+// scripts/make_demo_trace.py.
 
 const decode = (packed: string): Float32Array => Float32Array.from(packed.split(','), Number)
 
 /** What the microphone heard. */
-export const demoRoom = decode(
+export const demoNoisy = decode(
   '{pack(room)}',
 )
 
 /** What the model left. */
-export const demoDry = decode(
+export const demoClean = decode(
   '{pack(dry)}',
 )
 """

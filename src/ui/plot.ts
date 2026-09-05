@@ -1,12 +1,13 @@
-// The chart is the plug-in's "Room tail" display widened to a whole file. Both states use
-// the same grammar as the desktop UI: the dim filled envelope is what the microphone
-// captured, the bright phosphor line is what the model left. The dim area standing above
-// the line is the room that came out.
+// The chart is the plug-in's level display widened to a whole file. Both states use the
+// same grammar as the desktop UI: the dim filled envelope is what the microphone captured,
+// the bright phosphor line is what the model left. The dim area standing above the line is
+// what came out — the flat shelf between words is the noise floor, the slopes after words
+// are the room.
 //
-// The vertical axis is level in dB, not amplitude. Reverberation lives 20-50 dB under the
-// speech that caused it, so on a linear axis the whole story is a few pixels tall; in dB
-// the tails between words open out and the horizontal grid lines read as 15 dB steps.
-import { demoDry, demoRoom } from './demo-trace'
+// The vertical axis is level in dB, not amplitude. A noise floor sits 20-50 dB under the
+// speech above it, so on a linear axis the whole story is a few pixels tall; in dB the gaps
+// between words open out and the horizontal grid lines read as 15 dB steps.
+import { demoClean, demoNoisy } from './demo-trace'
 
 export interface AudioView {
   readonly dry: readonly Float32Array[]
@@ -127,7 +128,7 @@ export class Plot {
     const palette = this.palette()
     this.grid(context, palette)
     if (this.peaks) this.paint(context, palette, this.peaks.dry, this.peaks.wet)
-    else this.paint(context, palette, demoRoom, demoDry)
+    else this.paint(context, palette, demoNoisy, demoClean)
     this.blit()
   }
 

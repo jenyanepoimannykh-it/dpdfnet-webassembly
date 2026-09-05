@@ -4,12 +4,14 @@ import type { ModelMetadata } from '../dsp/dereverb'
 
 export interface LoadRequest {
   readonly type: 'load'
+  readonly model: string
 }
 
 export interface ProcessRequest {
   readonly type: 'process'
   /** Echoed back on every reply so a cancelled run's late results can be discarded. */
   readonly job: number
+  readonly model: string
   readonly channels: Float32Array[]
   readonly sampleRate: number
 }
@@ -28,6 +30,7 @@ export interface ModelProgressMessage {
 
 export interface ReadyMessage {
   readonly type: 'ready'
+  readonly model: string
   readonly metadata: ModelMetadata
   /** Milliseconds spent fetching weights and building the session. */
   readonly loadMs: number

@@ -3,6 +3,7 @@ import { decodeFile, DecodeError, downmixToMono } from './audio/decode'
 import { blend, levelDifferenceDb } from './audio/blend'
 import { encodeWav, type WavBitDepth } from './audio/wav'
 import { Player } from './audio/player'
+import { defaultModelId, findModel, modelChoices } from './models'
 import { Plot } from './ui/plot'
 import { Knob } from './ui/knob'
 import { formatChannels, formatClock, formatSpeed } from './ui/format'
@@ -34,6 +35,7 @@ const dom = {
   fileInput: element<HTMLInputElement>('file-input'),
   filepickButton: element('file-input').nextElementSibling as HTMLElement,
   stereoCheck: element<HTMLInputElement>('stereo-check'),
+  modelSelect: element<HTMLSelectElement>('model-select'),
   progressFill: element('progress-fill'),
   progressLabel: element('progress-label'),
   cancelButton: element<HTMLButtonElement>('cancel-button'),
@@ -59,7 +61,7 @@ const knob = new Knob(dom.knob, dom.mixSlider, dom.knobArc, dom.knobValue)
 
 let result: Result | null = null
 let worker: Worker | null = null
-let modelReady = false
+let loadedModel: string | null = null
 let currentJob = 0
 let frameHandle = 0
 
@@ -90,9 +92,9 @@ function handle(message: WorkerResponse): void {
       break
     }
     case 'ready': {
-      modelReady = true
+      loadedModel = message.model
       dom.engineStatus.classList.add('status--live')
-      setStatus('DPDFNET AI · 48 kHz · runs on your machine')
+      setStatus(`${findModel(message.model).name.toUpperCase()} · 48 kHz · runs on your machine`)
       break
     }
     case 'process-progress': {
@@ -100,7 +102,7 @@ function handle(message: WorkerResponse): void {
       const share = message.processedSeconds / Math.max(message.totalSeconds, 1e-6)
       setProgress(
         0.25 + share * 0.75,
-        `Removing the room, ${Math.round(share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
+        `Removing the noise, ${Math.round(share * 100)}%. ${formatSpeed(message.processedSeconds, message.elapsedMs)}`,
       )
       break
     }
@@ -180,10 +182,12 @@ async function load(file: File): Promise<void> {
       ? downmixToMono(decoded.channels)
       : decoded.channels
 
-  setProgress(modelReady ? 0.25 : 0.05, modelReady ? 'Removing the room' : 'Loading the model')
+  const model = dom.modelSelect.value
+  const ready = loadedModel === model
+  setProgress(ready ? 0.25 : 0.05, ready ? 'Removing the noise' : 'Loading the model')
   result = { name: file.name, dry: channels.map((c) => c.slice()), wet: [], sampleRate: modelSampleRate }
   send(
-    { type: 'process', job, channels, sampleRate: modelSampleRate },
+    { type: 'process', job, model, channels, sampleRate: modelSampleRate },
     channels.map((channel) => channel.buffer),
   )
 }
@@ -239,7 +243,7 @@ function reset(): void {
   knob.setEnabled(false)
   dom.stat.classList.add('stat--idle')
   dom.statUnit.textContent = 'Waiting for a file'
-  dom.panelReading.textContent = 'Example: 9 s in an untreated room'
+  dom.panelReading.textContent = 'Example: 9 s of speech under room noise'
   dom.readout.replaceChildren()
   dom.fileInput.value = ''
   show('pick')
@@ -284,8 +288,18 @@ dom.fileInput.addEventListener('change', () => {
 })
 
 function warmModel(): void {
-  if (!modelReady) send({ type: 'load' })
+  const model = dom.modelSelect.value
+  if (loadedModel !== model) send({ type: 'load', model })
 }
+
+for (const choice of modelChoices) {
+  const option = document.createElement('option')
+  option.value = choice.id
+  option.textContent = choice.label
+  option.selected = choice.id === defaultModelId
+  dom.modelSelect.append(option)
+}
+dom.modelSelect.addEventListener('change', warmModel)
 
 dom.cancelButton.addEventListener('click', () => {
   send({ type: 'cancel' })
@@ -303,7 +317,7 @@ dom.downloadButton.addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `${result.name.replace(/\.[^.]+$/, '')} dereverbed.wav`
+  anchor.download = `${result.name.replace(/\.[^.]+$/, '')} cleaned.wav`
   anchor.click()
   URL.revokeObjectURL(url)
 })

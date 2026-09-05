@@ -70,7 +70,7 @@ export class Knob {
     // pathLength is 100 on the arc, so the lit length is the percentage directly.
     this.arc.style.strokeDasharray = `${this.fraction * 100} 100`
     this.value.textContent = `${percent}%`
-    this.input.setAttribute('aria-valuetext', `${percent} percent dereverbed`)
+    this.input.setAttribute('aria-valuetext', `${percent} percent cleaned`)
   }
 }
 

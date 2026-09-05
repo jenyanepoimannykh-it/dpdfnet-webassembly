@@ -2,12 +2,8 @@
 // imported inside the worker too, which keeps its ~1 MB of glue off the first paint.
 import wasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url'
 import { CancelledError, DereverbEngine } from '../dsp/dereverb'
+import { modelUrls } from '../models'
 import type { WorkerRequest, WorkerResponse } from './protocol'
-
-// Weights live in public/ rather than the module graph: they are the one asset worth
-// letting the browser cache across deploys, and 10 MB has no business in a JS bundle.
-const modelUrl = `${import.meta.env.BASE_URL}models/dpdfnet2_48khz_hr.onnx`
-const metadataUrl = `${import.meta.env.BASE_URL}models/dpdfnet2_48khz_hr.meta.json`
 
 interface WorkerScope {
   postMessage(message: WorkerResponse, transfer?: Transferable[]): void
@@ -17,8 +13,12 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope
 const post = (message: WorkerResponse, transfer?: Transferable[]) => scope.postMessage(message, transfer)
 
+// Only one engine is held at a time. Both models together would sit in the WebAssembly
+// heap for the whole session, and switching is rare enough not to be worth that.
 let engine: DereverbEngine | null = null
+let engineId: string | null = null
 let loading: Promise<DereverbEngine> | null = null
+let loadingId: string | null = null
 let cancelRequested = false
 
 /** Intra-op threads for the convolutions. Capped low: the graph is small and per-frame,
@@ -29,28 +29,39 @@ function threadCount(): number {
   return Math.max(1, Math.min(4, cores - 1))
 }
 
-async function ensureEngine(): Promise<DereverbEngine> {
-  if (engine) return engine
-  if (!loading) {
-    const startedAt = performance.now()
-    loading = DereverbEngine.load({
-      modelUrl,
-      metadataUrl,
-      wasmBinaryUrl,
-      numThreads: threadCount(),
-      onModelProgress: (loadedBytes, totalBytes) =>
-        post({ type: 'model-progress', loadedBytes, totalBytes }),
-    }).then((loaded) => {
-      engine = loaded
-      post({ type: 'ready', metadata: loaded.metadata, loadMs: performance.now() - startedAt })
-      return loaded
+async function ensureEngine(model: string): Promise<DereverbEngine> {
+  if (engine && engineId === model) return engine
+  if (loading && loadingId === model) return loading
+
+  const previous = engine
+  engine = null
+  engineId = null
+  void previous?.release().catch(() => undefined)
+
+  const startedAt = performance.now()
+  loadingId = model
+  loading = DereverbEngine.load({
+    ...modelUrls(model),
+    wasmBinaryUrl,
+    numThreads: threadCount(),
+    onModelProgress: (loadedBytes, totalBytes) =>
+      post({ type: 'model-progress', loadedBytes, totalBytes }),
+  }).then((loaded) => {
+    engine = loaded
+    engineId = model
+    post({
+      type: 'ready',
+      model,
+      metadata: loaded.metadata,
+      loadMs: performance.now() - startedAt,
     })
-  }
+    return loaded
+  })
   return loading
 }
 
 async function process(request: ProcessRequestLike): Promise<void> {
-  const active = await ensureEngine()
+  const active = await ensureEngine(request.model)
   if (cancelRequested) throw new CancelledError()
   const { hopSize, sampleRate } = active.metadata
   if (request.sampleRate !== sampleRate) {
@@ -100,6 +111,7 @@ async function process(request: ProcessRequestLike): Promise<void> {
 
 interface ProcessRequestLike {
   readonly job: number
+  readonly model: string
   readonly channels: Float32Array[]
   readonly sampleRate: number
 }
@@ -111,7 +123,7 @@ scope.addEventListener('message', (event) => {
     return
   }
   if (request.type === 'load') {
-    ensureEngine().catch((error) => post({ type: 'error', message: describe(error) }))
+    ensureEngine(request.model).catch((error) => post({ type: 'error', message: describe(error) }))
     return
   }
   cancelRequested = false

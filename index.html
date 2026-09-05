@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deadroom — neural room removal for voice</title>
+    <title>Hush — neural noise removal for voice</title>
     <meta
       name="description"
       content="Remove room reverberation from audio and video in your browser. The DPDFNet model runs on your own machine; nothing is uploaded."
@@ -17,22 +17,22 @@
 
     <div class="shell">
       <header class="masthead">
-        <h1 class="masthead__name">Deadroom</h1>
-        <p class="masthead__tag">Neural room removal for voice, in the browser</p>
+        <h1 class="masthead__name">Hush</h1>
+        <p class="masthead__tag">Neural noise removal for voice, in the browser</p>
       </header>
 
       <section class="intro">
         <p class="intro__lede">
-          Drop in something you recorded in a hallway, a bedroom, a boardroom. DPDFNet runs
-          inside this tab and pulls the reflections off the voice. Audio or video, nothing
-          uploaded, no account.
+          Air conditioning, a fan, traffic, hiss, the hum of the laptop you recorded on.
+          DPDFNet runs inside this tab and lifts the voice out from under it, and takes some
+          of the room with it. Audio or video, nothing uploaded, no account.
         </p>
       </section>
 
       <section class="panel" id="panel" aria-labelledby="panel-title">
         <div class="panel__head">
-          <h2 class="panel__title" id="panel-title">Room tail</h2>
-          <p class="panel__reading" id="panel-reading">Example: 9 s in an untreated room</p>
+          <h2 class="panel__title" id="panel-title">Noise floor</h2>
+          <p class="panel__reading" id="panel-reading">Example: 9 s of speech under room noise</p>
         </div>
 
         <div class="panel__frame">
@@ -88,6 +88,10 @@
               <span class="filepick__button">Choose a file</span>
             </label>
             <label class="check">
+              <span>Model</span>
+              <select id="model-select"></select>
+            </label>
+            <label class="check">
               <input type="checkbox" id="stereo-check" />
               <span>Keep both channels</span>
             </label>
@@ -95,7 +99,9 @@
           <p class="stage__note">
             Or drop one anywhere on this page. Video files are read for their sound and come
             back as a WAV. Stereo is summed to mono unless you ask otherwise — it halves the
-            work and speech loses nothing.
+            work and speech loses nothing. The larger model is worth about a third of a
+            decibel over the standard one, so reach for it only if you are chasing the last
+            of it.
           </p>
         </div>
 
@@ -133,15 +139,21 @@
       <section class="notes">
         <h2 class="notes__title">How it works</h2>
         <p>
-          Deadroom runs <strong>DPDFNet</strong>, a dual-path speech enhancement network
-          published by CEVA, through ONNX Runtime compiled to WebAssembly. Your file is decoded by the
+          Hush runs <strong>DPDFNet</strong>, a dual-path speech enhancement network published
+          by CEVA, through ONNX Runtime compiled to WebAssembly. Your file is decoded by the
           browser, resampled to the 48&nbsp;kHz the model expects, and pushed through it
-          20&nbsp;milliseconds at a time. Each channel carries its own recurrent state, exactly
-          as it does in the desktop plug-in.
+          20&nbsp;milliseconds at a time, each channel carrying its own recurrent state.
         </p>
         <p>
-          The first visit downloads about 10&nbsp;MB of model weights and keeps them in the
-          browser's cache, so later visits start straight away.
+          On speech buried in noise it recovers between 8 and 15&nbsp;dB, most of it where the
+          input is worst. It shortens a reverberant room too, though far less dramatically.
+          The network's own 40&nbsp;millisecond delay is measured back out of the result, so
+          what you download lines up sample for sample with what you put in — drop it straight
+          back onto the video it came from.
+        </p>
+        <p>
+          The first visit downloads the model weights and keeps them in the browser's cache,
+          so later visits start straight away.
         </p>
         <p class="notes__credit">
           DPDFNet is © CEVA,&nbsp;Inc., released under the Apache&nbsp;License&nbsp;2.0. ONNX

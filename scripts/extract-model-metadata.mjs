@@ -5,14 +5,14 @@
 // Only the top level of ModelProto is walked, and only field 14 (metadata_props, a repeated
 // StringStringEntryProto with key = field 1 and value = field 2). Everything else is skipped
 // by length, so no protobuf schema or dependency is required.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const modelPath = resolve(root, 'public/models/dpdfnet2_48khz_hr.onnx')
-const outPath = resolve(root, 'public/models/dpdfnet2_48khz_hr.meta.json')
+const modelDir = resolve(root, 'public/models')
 
+function extract(modelPath) {
 const bytes = readFileSync(modelPath)
 
 function readVarint(buf, pos) {
@@ -105,9 +105,17 @@ const meta = {
   ],
 }
 
+const outPath = modelPath.replace(/\.onnx$/, '.meta.json')
 writeFileSync(outPath, JSON.stringify(meta))
 const seeded = meta.stateInit.reduce((total, segment) => total + segment.values.length, 0)
+// `profile` is not trustworthy: dpdfnet8_48khz_hr carries dpdfnet2_48khz_hr's string
+// upstream, which is why the site names models itself rather than reading them from here.
 console.log(
-  `${meta.profile}: ${meta.sampleRate} Hz, fft ${meta.fftSize}/${meta.hopSize}, ` +
-  `${meta.bins} bins, state ${meta.stateSize} (${seeded} seeded) -> ${outPath}`,
+  `${modelPath.split('/').pop()}: ${meta.sampleRate} Hz, fft ${meta.fftSize}/${meta.hopSize}, ` +
+  `${meta.bins} bins, state ${meta.stateSize} (${seeded} seeded), profile says "${meta.profile}"`,
 )
+}
+
+for (const name of readdirSync(modelDir).filter((file) => file.endsWith('.onnx')).sort()) {
+  extract(resolve(modelDir, name))
+}
