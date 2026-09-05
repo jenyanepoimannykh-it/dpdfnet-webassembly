@@ -1,0 +1,534 @@
+@import '@fontsource-variable/archivo/wdth.css';
+
+/* The palette is sampled from the JenyaDereverb2 plug-in: a black panel, one phosphor
+   green, and two levels of green-grey text. Nothing else is coloured. */
+:root {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --text: #e4fbe6;
+  --dim: #6f8f74;
+  --dimmer: #55705c;
+  --phosphor: #90ee90;
+  --fill: rgb(144 238 144 / 0.2);
+  --track: #112114;
+  --edge: #16291a;
+
+  --measure: 60ch;
+  --gutter: clamp(1.25rem, 5vw, 2.5rem);
+  --step: clamp(2.25rem, 5vw, 3.5rem);
+  --radius: 6px;
+
+  --sans: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Several rules below set display on elements this attribute hides, and a class beats the
+   user-agent rule. Stated once rather than guarded at every site. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-variation-settings: 'wdth' 100;
+  font-size: 1rem;
+  line-height: 1.6;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  width: min(100% - 2 * var(--gutter), 58rem);
+  margin-inline: auto;
+  padding-block: clamp(2rem, 6vw, 3.5rem) calc(var(--step) * 1.4);
+}
+
+p {
+  margin: 0 0 0.9em;
+  max-width: var(--measure);
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  background: var(--phosphor);
+  color: #000;
+  padding: 0.6rem 1rem;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* --- masthead ------------------------------------------------------------ */
+
+.masthead {
+  margin-bottom: 1.75rem;
+}
+
+.masthead__name {
+  font-size: clamp(1.9rem, 5vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0;
+}
+
+.masthead__tag {
+  color: var(--dim);
+  font-size: 0.875rem;
+  margin: 0.35rem 0 0;
+}
+
+.intro {
+  margin-bottom: 2rem;
+}
+
+.intro__lede {
+  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.1875rem);
+  color: var(--dim);
+  line-height: 1.55;
+}
+
+/* --- instrument panel ---------------------------------------------------- */
+
+.panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 0.5rem;
+}
+
+.panel__title,
+.panel__reading {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--dim);
+  max-width: none;
+}
+
+.panel__reading {
+  font-variant-numeric: tabular-nums;
+}
+
+.panel__frame {
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+}
+
+.panel__canvas {
+  display: block;
+  width: 100%;
+  height: clamp(180px, 26vw, 260px);
+  cursor: crosshair;
+}
+
+.panel__gauges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem 2.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 1.25rem;
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+/* Idle there is no measurement to show, and a dash at display size reads as a lit bar, so
+   the number is withheld and the unit carries the empty state instead. */
+.stat--idle .stat__value {
+  display: none;
+}
+
+.stat--idle .stat__unit {
+  font-size: 0.9375rem;
+}
+
+.stat__value {
+  font-size: clamp(2.4rem, 7vw, 3.4rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--phosphor);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__unit {
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* --- mix knob ------------------------------------------------------------ */
+
+.knob {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+}
+
+.knob__dial {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  touch-action: none;
+}
+
+.knob__dial svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.knob__track,
+.knob__arc {
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+.knob__track {
+  stroke: var(--track);
+}
+
+.knob__arc {
+  stroke: var(--phosphor);
+  stroke-dasharray: 100 100;
+  stroke-dashoffset: 0;
+  transition: stroke-dasharray 60ms linear;
+}
+
+.knob__value {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* The native control stays in the page for keyboard and assistive technology; the dial is
+   drawn over it. Hiding it with display:none would take the semantics with it. */
+.knob__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ns-resize;
+}
+
+.knob__input:disabled {
+  cursor: not-allowed;
+}
+
+.knob:has(.knob__input:disabled) .knob__arc {
+  stroke: var(--dimmer);
+}
+
+.knob:has(.knob__input:disabled) .knob__value {
+  color: var(--dim);
+}
+
+.knob__dial:has(:focus-visible) {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 4px;
+  border-radius: 50%;
+}
+
+.knob__label {
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* --- status line --------------------------------------------------------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 1.25rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
+  color: var(--dim);
+  font-size: 0.8125rem;
+  max-width: none;
+}
+
+.status__lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dimmer);
+  flex: none;
+}
+
+.status--live .status__lamp {
+  background: var(--phosphor);
+  box-shadow: 0 0 6px rgb(144 238 144 / 0.8);
+}
+
+.note {
+  margin: 1.25rem 0 0;
+  padding-left: 0.8rem;
+  border-left: 2px solid var(--phosphor);
+  color: var(--dim);
+  font-size: 0.8125rem;
+  max-width: 48ch;
+}
+
+/* --- controls ------------------------------------------------------------ */
+
+.controls {
+  margin-top: 1.75rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--edge);
+}
+
+.stage {
+  display: grid;
+  gap: 1.1rem;
+  justify-items: start;
+}
+
+.stage__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.25rem;
+  align-items: center;
+}
+
+.stage__row--split {
+  width: 100%;
+}
+
+.stage__note {
+  color: var(--dim);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.stage__status {
+  color: var(--dim);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.filepick input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.filepick__button,
+.button {
+  display: inline-block;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 0.55rem 1.25rem;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dim);
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.filepick__button,
+.button--primary {
+  border-color: var(--phosphor);
+  color: var(--phosphor);
+}
+
+.filepick__button:hover,
+.button--primary:hover {
+  background: var(--phosphor);
+  color: #000;
+}
+
+.button:hover {
+  border-color: var(--dim);
+  color: var(--text);
+}
+
+.filepick input:focus-visible + .filepick__button {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 2px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--dim);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.check input[type='checkbox'] {
+  accent-color: var(--phosphor);
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.check select {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text);
+  background: #000;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.45rem;
+}
+
+.clock {
+  color: var(--dim);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  width: 100%;
+  max-width: 30rem;
+  height: 4px;
+  background: var(--track);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--phosphor);
+  transition: width 160ms linear;
+}
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.75rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.readout div {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.readout dt {
+  color: var(--dim);
+}
+
+.readout dd {
+  margin: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.alert {
+  margin-top: 0.5rem;
+  padding-left: 0.8rem;
+  border-left: 2px solid var(--phosphor);
+  color: var(--text);
+  font-size: 0.9375rem;
+  max-width: 50ch;
+}
+
+/* --- notes --------------------------------------------------------------- */
+
+.notes {
+  margin-top: var(--step);
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--edge);
+  color: var(--dim);
+  font-size: 0.9375rem;
+}
+
+.notes__title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0 0 0.8rem;
+}
+
+.notes__credit {
+  color: var(--dim);
+  font-size: 0.8125rem;
+  margin-top: 1.4rem;
+}
+
+/* --- drop veil ----------------------------------------------------------- */
+
+.dropveil {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.88);
+  z-index: 20;
+}
+
+.dropveil span {
+  font-size: clamp(1.5rem, 5vw, 2.5rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--phosphor);
+  border: 1px dashed var(--phosphor);
+  border-radius: var(--radius);
+  padding: 1.75rem 3rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}

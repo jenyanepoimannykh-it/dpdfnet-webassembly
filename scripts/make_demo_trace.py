@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Regenerate src/ui/demo-trace.ts, the measured trace the idle chart draws.
+
+Convolves dry speech with a synthetic room, runs it through the model via
+reference_dereverb.py, and writes both level envelopes as a small TypeScript module. The
+idle chart is therefore a real measurement rather than a drawing.
+
+    python scripts/make_demo_trace.py speech-48k-mono.wav
+"""
+import argparse
+import pathlib
+
+import numpy as np
+import onnxruntime as ort
+import soundfile as sf
+
+from reference_dereverb import MODEL, ROOT, dereverb, load_metadata
+
+BUCKETS = 600
+
+
+def room_impulse(rate: int, rt60: float, drr_db: float, seed: int = 7) -> np.ndarray:
+    """Direct sound plus an exponentially decaying noise tail at a chosen direct-to-
+    reverberant ratio. Crude next to a measured room, but the decay law is the part that
+    matters here."""
+    rng = np.random.default_rng(seed)
+    length = int(min(1.2, rt60 * 2) * rate)
+    t = np.arange(length) / rate
+    tail = rng.normal(size=length) * np.exp(-6.9 * t / rt60)
+    tail[: int(0.0035 * rate)] = 0  # roughly a metre of extra path to the first reflection
+    tail *= np.sqrt(10 ** (-drr_db / 10) / np.sum(tail**2))
+    tail[0] = 1.0
+    return tail
+
+
+def envelope(samples: np.ndarray, buckets: int) -> np.ndarray:
+    edges = np.linspace(0, len(samples), buckets + 1).astype(int)
+    return np.array([np.max(np.abs(samples[a:b])) for a, b in zip(edges, edges[1:])])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("speech", help="dry 48 kHz mono speech")
+    parser.add_argument("--rt60", type=float, default=0.7)
+    parser.add_argument("--drr", type=float, default=0.0, help="direct-to-reverberant ratio, dB")
+    parser.add_argument("--seconds", type=float, default=9.0)
+    parser.add_argument("--skip", type=float, default=0.4, help="seconds to trim from the start")
+    args = parser.parse_args()
+
+    meta = load_metadata()
+    speech, rate = sf.read(args.speech, dtype="float64", always_2d=True)
+    if rate != meta["sampleRate"]:
+        raise SystemExit(f"{args.speech} is {rate} Hz; the model needs {meta['sampleRate']} Hz")
+    speech = speech[:, 0]
+
+    reverberant = np.convolve(speech, room_impulse(rate, args.rt60, args.drr))[: len(speech)]
+    reverberant *= 0.35 / np.max(np.abs(reverberant))
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    session = ort.InferenceSession(str(MODEL), options, providers=["CPUExecutionProvider"])
+    processed = dereverb(reverberant.astype(np.float32), meta, session)
+
+    start, stop = int(args.skip * rate), int((args.skip + args.seconds) * rate)
+    stop = min(stop, len(processed))
+    room = envelope(reverberant[start:stop], BUCKETS)
+    dry = envelope(processed[start:stop], BUCKETS)
+    peak = room.max()
+    room, dry = room / peak, dry / peak
+
+    trim = lambda x: (f"{x:.3f}".rstrip("0").rstrip(".") or "0")
+    pack = lambda values: ",".join(trim(v) for v in values)
+    out = ROOT / "src/ui/demo-trace.ts"
+    out.write_text(
+        f"""// The idle chart is a real measurement, not an illustration. {args.seconds:.0f} seconds of speech
+// convolved with a synthetic room (RT60 {args.rt60} s, direct-to-reverberant {args.drr:+.0f} dB), then
+// run through this same model by scripts/reference_dereverb.py. Peak magnitude per bucket,
+// normalised to the reverberant peak. Regenerate with scripts/make_demo_trace.py.
+
+const decode = (packed: string): Float32Array => Float32Array.from(packed.split(','), Number)
+
+/** What the microphone heard. */
+export const demoRoom = decode(
+  '{pack(room)}',
+)
+
+/** What the model left. */
+export const demoDry = decode(
+  '{pack(dry)}',
+)
+"""
+    )
+    print(f"wrote {out} ({out.stat().st_size} bytes, {BUCKETS} buckets)")
+
+
+if __name__ == "__main__":
+    main()
