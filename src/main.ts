@@ -27,7 +27,6 @@ const dom = {
   knobArc: document.getElementById('knob-arc') as unknown as SVGPathElement,
   knobValue: element('knob-value'),
   mixSlider: element<HTMLInputElement>('mix-slider'),
-  mixNote: element('mix-note'),
   readout: element<HTMLDListElement>('file-readout'),
   stagePick: element('stage-pick'),
   stageBusy: element('stage-busy'),
@@ -273,10 +272,7 @@ plot.onSeek((seconds) => {
   if (result?.wet.length) player.seek(seconds)
 })
 
-knob.onChange((fraction) => {
-  player.setMix(fraction)
-  dom.mixNote.hidden = fraction === 0 || fraction === 1
-})
+knob.onChange((fraction) => player.setMix(fraction))
 
 // --- events --------------------------------------------------------------
 

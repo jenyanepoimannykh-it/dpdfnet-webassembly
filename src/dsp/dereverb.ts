@@ -61,6 +61,20 @@ export interface LoadOptions {
 /** How often the frame loop hands control back, in frames (~0.6 s of audio). */
 const progressInterval = 64
 
+/**
+ * The network's own algorithmic delay, in windows. An impulse fed in at sample n leaves at
+ * n + 2 * fftSize — 1920 samples, 40 ms at 48 kHz — which is confirmed three ways: the peak
+ * of the measured impulse response, the cross-correlation lag against the input, and the
+ * shift at which this pipeline lines up with dpdfnet.enhance() to 65 dB.
+ *
+ * The real-time plug-in cannot remove this; it reports one window of latency and leaves the
+ * rest, which is why its dry and wet paths are 20 ms apart and why partial mix settings
+ * comb-filter there. Offline there is no such constraint, so the whole delay is taken out
+ * and the returned signal is sample-aligned with the input. The upstream offline path does
+ * the same thing, by trimming 2 * win_len off the front of its ISTFT.
+ */
+const modelDelayWindows = 2
+
 export class DereverbEngine {
   private readonly session: ort.InferenceSession
   readonly metadata: ModelMetadata
@@ -107,22 +121,29 @@ export class DereverbEngine {
     return new DereverbEngine(session, metadata)
   }
 
+  /** Samples of network delay to take back out of the result. */
+  private get modelDelay(): number {
+    return modelDelayWindows * this.metadata.fftSize
+  }
+
   /**
    * Frames covering `input` with `fftSize - hopSize` samples of silence padded onto each
    * end, which is exactly the state the plug-in's ring buffers start and end in. Every
-   * original sample then falls under two windows and comes back at unity gain.
+   * original sample then falls under two windows and comes back at unity gain. The run is
+   * extended by the model delay so the tail is not cut off once the result is shifted back.
    */
   private frameCount(length: number): number {
     const { fftSize, hopSize } = this.metadata
-    const padded = length + 2 * (fftSize - hopSize)
+    const padded = length + this.modelDelay + 2 * (fftSize - hopSize)
     return Math.max(1, Math.ceil((padded - fftSize) / hopSize) + 1)
   }
 
   async processChannel(input: Float32Array, options: ProcessOptions = {}): Promise<ChannelResult> {
     const { fftSize, hopSize, bins, stateSize } = this.metadata
     const pad = fftSize - hopSize
+    const delay = this.modelDelay
     const totalFrames = this.frameCount(input.length)
-    const output = new Float32Array(input.length + 2 * pad + fftSize)
+    const output = new Float32Array((totalFrames - 1) * hopSize + fftSize)
     const reductionDb = new Float32Array(totalFrames)
 
     const real = new Float64Array(fftSize)
@@ -198,7 +219,10 @@ export class DereverbEngine {
     }
 
     options.onProgress?.({ frame: totalFrames, totalFrames })
-    return { wet: output.subarray(pad, pad + input.length), reductionDb }
+    // Skipping `delay` samples is what aligns the result with the input; the run was
+    // lengthened by the same amount above so nothing is lost off the end.
+    const from = pad + delay
+    return { wet: output.subarray(from, from + input.length), reductionDb }
   }
 
   release(): Promise<void> {

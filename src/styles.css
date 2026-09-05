@@ -307,15 +307,6 @@ strong {
   box-shadow: 0 0 6px rgb(144 238 144 / 0.8);
 }
 
-.note {
-  margin: 1.25rem 0 0;
-  padding-left: 0.8rem;
-  border-left: 2px solid var(--phosphor);
-  color: var(--dim);
-  font-size: 0.8125rem;
-  max-width: 48ch;
-}
-
 /* --- controls ------------------------------------------------------------ */
 
 .controls {

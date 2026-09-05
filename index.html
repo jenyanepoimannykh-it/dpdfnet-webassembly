@@ -70,7 +70,6 @@
                 step="1"
                 value="100"
                 aria-label="Mix"
-                aria-describedby="mix-note"
                 disabled
               />
             </div>
@@ -80,11 +79,6 @@
 
         <p class="status" id="engine-status"><span class="status__lamp"></span>Model not loaded</p>
       </section>
-
-      <p class="note" id="mix-note" hidden>
-        Partway settings can cancel: the model rebuilds phase, so some frequencies subtract
-        rather than blend. Both ends of the knob are always safe.
-      </p>
 
       <section class="controls" aria-live="polite">
         <div class="stage" id="stage-pick">
@@ -139,8 +133,8 @@
       <section class="notes">
         <h2 class="notes__title">How it works</h2>
         <p>
-          Deadroom runs <strong>DPDFNet</strong>, a dual-path de-reverberation network published
-          by CEVA, through ONNX Runtime compiled to WebAssembly. Your file is decoded by the
+          Deadroom runs <strong>DPDFNet</strong>, a dual-path speech enhancement network
+          published by CEVA, through ONNX Runtime compiled to WebAssembly. Your file is decoded by the
           browser, resampled to the 48&nbsp;kHz the model expects, and pushed through it
           20&nbsp;milliseconds at a time. Each channel carries its own recurrent state, exactly
           as it does in the desktop plug-in.

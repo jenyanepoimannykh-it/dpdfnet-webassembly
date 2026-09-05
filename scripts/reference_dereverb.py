@@ -44,12 +44,19 @@ def seed_state(meta: dict) -> np.ndarray:
     return state
 
 
+# The network's own algorithmic delay, in windows: an impulse fed in at sample n leaves at
+# n + 2 * win_len. Upstream's offline path removes it by trimming 2 * win_len off the front
+# of its ISTFT; the real-time path cannot and leaves it in.
+MODEL_DELAY_WINDOWS = 2
+
+
 def dereverb(samples: np.ndarray, meta: dict, session: ort.InferenceSession) -> np.ndarray:
     size, hop, bins = meta["fftSize"], meta["hopSize"], meta["bins"]
     pad = size - hop
+    delay = MODEL_DELAY_WINDOWS * size
     window = vorbis_window(size)
 
-    frames = max(1, int(np.ceil((len(samples) + 2 * pad - size) / hop)) + 1)
+    frames = max(1, int(np.ceil((len(samples) + delay + 2 * pad - size) / hop)) + 1)
     padded = np.concatenate(
         [np.zeros(pad, np.float64), samples.astype(np.float64), np.zeros(frames * hop + size)]
     )
@@ -72,7 +79,10 @@ def dereverb(samples: np.ndarray, meta: dict, session: ort.InferenceSession) -> 
         full[bins:] = np.conj(half[1 : size - bins + 1][::-1])
         out[start : start + size] += np.real(np.fft.ifft(full)) * window
 
-    return out[pad : pad + len(samples)].astype(np.float32)
+    # Skipping `delay` samples aligns the result with the input; the run was lengthened by
+    # the same amount above so the tail survives the shift.
+    start = pad + delay
+    return out[start : start + len(samples)].astype(np.float32)
 
 
 def main() -> None:
