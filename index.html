@@ -38,7 +38,7 @@
               <input type="checkbox" id="dereverb-on" checked />
               <span>On</span>
             </label>
-            <p class="module__reading">Weighted prediction error, 12 taps</p>
+            <p class="module__reading">Linear prediction, 12 taps</p>
           </header>
           <div class="module__frame">
             <canvas class="module__canvas" id="dereverb-canvas"></canvas>
@@ -64,7 +64,8 @@
             A filter fitted to the reverberation and subtracted — arithmetic rather than a
             network, so there is nothing to download for this stage. Worth a decibel or two
             on a boomy room, and it costs a little on a recording with no room to remove,
-            which makes it the one stage worth switching off.
+            which makes it the one stage worth switching off. The method is called weighted
+            prediction error, after the residual it leaves behind.
           </p>
         </article>
 
