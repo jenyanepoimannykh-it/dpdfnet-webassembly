@@ -4,6 +4,11 @@ Neural noise removal for voice, running entirely in the browser. Drop in audio o
 [DPDFNet](https://github.com/ceva-ip/DPDFNet) lifts the voice out from under the noise, and
 you get a 48 kHz WAV back. No upload, no server, no account.
 
+The main interface is `/dereverb/`, with `/denoise/` as a separate secondary tool. Both run
+the same DPDFNet pass, which is what the JenyaDereverb2 plug-in ships as its de-reverb: the
+network takes room and noise out together and has no control for either separately. The two
+pages differ in what they say and in the material they are pointed at, not in what runs.
+
 One pass of DPDFNet-8 through ONNX Runtime compiled to WebAssembly — the same network
 embedded in the JenyaDereverb2 VST3/AU plug-in. It removes noise and about a decibel of room
 together, because that is what it was trained to do; it has no separate control for either.
@@ -124,10 +129,37 @@ already attenuated, and feeding it its own output gives it nothing new. `voice-e
 the same conclusion independently — "one restrained noise-suppression pass; no second cleanup
 pass, preserving a stable natural floor".
 
-An earlier build put a linear de-reverberation stage (weighted prediction error) in front of
-the network, which was worth about +0.6 dB more on a reverberant room but cost 3.4 dB on
-material with no room to remove. It was dropped in favour of one honest box. It is in the
-git history if it is ever wanted back.
+### The linear room filter, again
+
+`src/dsp/wpe.ts` came back to run `/dereverb/` on its own and has been removed a second
+time, so this is the record of what it was worth. Two of its constants were badly chosen and
+had never been measured. The weighting floored each frame's power at an absolute `1e-12`,
+which handed frames of near-silence weights in the billions and let them decide a fit that
+had no reverberation in it to cancel — the floor belongs at about `1e-2` of the loudest
+frame in the same band. And 12 taps reached only 299 ms, short of the tails the tool is
+pointed at; 30 is the knee. Fitting up to 12 kHz rather than 8 kHz is worth another 0.1 to
+0.3 dB, and above 12 kHz there is nothing left to take. Scored on the level in the gaps
+between words of the page's own example clip:
+
+| WPE as first written | −2.20 dB |
+|---|---|
+| WPE with all three fixed | −4.88 dB |
+| **DPDFNet, one pass** | **−7.14 dB** |
+
+Tuning it was worth a lot in relative terms and not enough in absolute ones. The network
+takes half again as much room out of the same clip, and it is what the plug-in ships, so it
+runs both pages and the linear filter is gone rather than kept as dead weight — the same
+call, for the same reason, as the commit that removed it the first time. What it cost is
+speed: tuned WPE ran at 9× real time where the network runs at about 2×.
+
+Three things that look like they should help WPE do not, recorded so they are not tried a
+third time. A second pass over the residual makes it *worse* (+2.62 → +1.69 dB at RT60 0.4):
+after one fit the predictable tail is gone and the second starts cancelling signal. Delaying
+the filter a third frame scores far better against a target that keeps 50 ms of early
+reflections (+4.18 vs +2.62) and exactly the same against one that keeps 25 ms — the metric
+being flattered for removing less, not more room coming out. And a shorter analysis window,
+which should localise the tail better, loses across the board: 2048-point scores +0.60 dB
+where 4096 scores +2.62.
 
 ### The model
 
@@ -144,10 +176,11 @@ file.
 
 ## Notes on the interface
 
-The mix knob is a true crossfade, `dry + mix * (wet - dry)`, applied identically in the
-player and the exporter. It is equivalent to upstream's `--attn-limit-db`, which blends the
-same two spectra with `alpha = 10 ** (-dB / 20)`; a mix of *m* is an attenuation limit of
-`-20 * log10(1 - m)` dB.
+Each pass is all or nothing. The Off/On switch is the crossfade `dry + mix * (wet - dry)`
+pinned to its ends, applied identically in the player and the exporter: On is the processed
+signal alone, Off is the original alone, and both are whole. The blend itself is still
+equivalent to upstream's `--attn-limit-db`, which mixes the same two spectra with
+`alpha = 10 ** (-dB / 20)`, should an intermediate setting ever come back.
 
 The chart plots what the pass did: the input as the filled envelope, the output as the
 trace. What still shows through the fill is what came out. The number beside it is the change
@@ -156,9 +189,6 @@ rather than broadband level, which barely moves when the model works well: speec
 the average, and speech is what it is trying to keep. It is clamped at −90 dBFS, since the
 network takes the gaps to digital silence and the unclamped ratio runs past 80 dB and says
 nothing.
-
-"Hear the original" monitors the untouched input without moving the mix, so it never changes
-what gets exported.
 
 Stereo is summed to mono by default. Speech enhancement gains nothing from a second
 correlated channel and it doubles the work, but "Keep both channels" processes each with
