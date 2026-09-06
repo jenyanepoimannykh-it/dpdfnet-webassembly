@@ -94,6 +94,57 @@ strong {
   margin-bottom: 1.75rem;
 }
 
+.masthead__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.masthead__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.masthead__brand img {
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.toolnav {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.2rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+
+.toolnav a {
+  border-radius: 3px;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.55rem 0.8rem;
+  text-decoration: none;
+}
+
+.toolnav a:hover {
+  color: var(--text);
+}
+
+.toolnav a[aria-current='page'] {
+  background: var(--track);
+  color: var(--phosphor);
+}
+
 .masthead__name {
   font-size: clamp(1.9rem, 5vw, 2.6rem);
   font-weight: 700;
@@ -106,16 +157,6 @@ strong {
   color: var(--dim);
   font-size: 0.875rem;
   margin: 0.35rem 0 0;
-}
-
-.intro {
-  margin-bottom: 2rem;
-}
-
-.intro__lede {
-  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.1875rem);
-  color: var(--dim);
-  line-height: 1.55;
 }
 
 /* --- the rack ------------------------------------------------------------ */
@@ -185,10 +226,107 @@ strong {
   max-width: 58ch;
 }
 
+.binary-effect {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
+.binary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.binary input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.binary__track {
+  position: relative;
+  width: 2.75rem;
+  height: 1.45rem;
+  border: 1px solid var(--dimmer);
+  border-radius: 999px;
+  background: var(--track);
+  transition: border-color 120ms ease;
+}
+
+.binary__track span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: translate 120ms ease, background-color 120ms ease;
+}
+
+.binary input:checked + .binary__track {
+  border-color: var(--phosphor);
+}
+
+.binary input:checked + .binary__track span {
+  translate: 1.28rem 0;
+  background: var(--phosphor);
+}
+
+.binary input:focus-visible + .binary__track {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 3px;
+}
+
+.binary-effect__value {
+  color: var(--phosphor);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .stat {
   display: flex;
   align-items: baseline;
   gap: 0.55rem;
+}
+
+.idle-play {
+  display: none;
+  width: 2.7rem;
+  height: 2.7rem;
+  place-items: center;
+  border: 1px solid var(--phosphor);
+  border-radius: 50%;
+  padding: 0 0 0 0.15rem;
+  background: transparent;
+  color: var(--phosphor);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.idle-play:hover {
+  background: var(--phosphor);
+  color: #000;
+}
+
+/* While the model downloads and runs on the example there is nothing to press. */
+.idle-play:disabled,
+.idle-play:disabled:hover {
+  cursor: progress;
+  border-color: var(--dim);
+  background: transparent;
+  color: var(--dim);
+}
+
+.stat--idle .idle-play {
+  display: grid;
 }
 
 /* Idle there is no measurement to show, and a dash at display size reads as a lit bar, so
@@ -211,91 +349,6 @@ strong {
 }
 
 .stat__unit {
-  color: var(--dim);
-  font-size: 0.8125rem;
-}
-
-/* --- mix knob ------------------------------------------------------------ */
-
-.knob {
-  display: grid;
-  justify-items: center;
-  gap: 0.5rem;
-}
-
-.knob__dial {
-  position: relative;
-  width: 76px;
-  height: 76px;
-  touch-action: none;
-}
-
-.knob__dial svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.knob__track,
-.knob__arc {
-  fill: none;
-  stroke-width: 7;
-  stroke-linecap: round;
-}
-
-.knob__track {
-  stroke: var(--track);
-}
-
-.knob__arc {
-  stroke: var(--phosphor);
-  stroke-dasharray: 100 100;
-  stroke-dashoffset: 0;
-  transition: stroke-dasharray 60ms linear;
-}
-
-.knob__value {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-
-/* The native control stays in the page for keyboard and assistive technology; the dial is
-   drawn over it. Hiding it with display:none would take the semantics with it. */
-.knob__input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: ns-resize;
-}
-
-.knob__input:disabled {
-  cursor: not-allowed;
-}
-
-.knob:has(.knob__input:disabled) .knob__arc {
-  stroke: var(--dimmer);
-}
-
-.knob:has(.knob__input:disabled) .knob__value {
-  color: var(--dim);
-}
-
-.knob__dial:has(:focus-visible) {
-  outline: 2px solid var(--phosphor);
-  outline-offset: 4px;
-  border-radius: 50%;
-}
-
-.knob__label {
   color: var(--dim);
   font-size: 0.8125rem;
 }
@@ -374,7 +427,9 @@ strong {
 
 .filepick__button,
 .button {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font: inherit;
   font-size: 0.9375rem;
   font-weight: 500;
@@ -385,6 +440,18 @@ strong {
   background: transparent;
   color: var(--dim);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.button__icon {
+  display: inline-grid;
+  min-width: 0.8em;
+  place-items: center;
+  font-size: 0.72em;
+  line-height: 1;
+}
+
+.button__icon--large {
+  font-size: 1.15em;
 }
 
 .filepick__button,
@@ -511,6 +578,59 @@ strong {
   color: var(--dim);
   font-size: 0.8125rem;
   margin-top: 1.4rem;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.footer__plugin {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.footer__plugin a {
+  color: var(--text);
+  text-underline-offset: 0.2em;
+}
+
+.footer__plugin a:hover {
+  color: var(--phosphor);
+}
+
+.footer__socials {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.social-link {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  color: var(--dim);
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.social-link:hover {
+  border-color: var(--phosphor);
+  color: var(--phosphor);
+}
+
+.social-link svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
 }
 
 /* --- drop veil ----------------------------------------------------------- */

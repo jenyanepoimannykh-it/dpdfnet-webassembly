@@ -50,7 +50,7 @@ export class Plot {
   private height = 0
   private ratio = 1
   private seekListener: ((seconds: number) => void) | null = null
-  private readonly idle: IdleTrace
+  private idle: IdleTrace
 
   constructor(canvas: HTMLCanvasElement, idle: IdleTrace) {
     this.canvas = canvas
@@ -75,24 +75,30 @@ export class Plot {
 
   showAudio(view: AudioView): void {
     this.duration = view.dry[0].length / view.sampleRate
-    const dry = envelope(view.dry, bucketCount)
-    const wet = envelope(view.wet, bucketCount)
-    let loudest = 0
-    for (const value of dry) if (value > loudest) loudest = value
-    const scale = loudest > 0 ? 1 / loudest : 1
-    for (let i = 0; i < bucketCount; i += 1) {
-      dry[i] *= scale
-      wet[i] *= scale
-    }
-    this.peaks = { dry, wet }
+    const trace = traceOf(view.dry, view.wet)
+    this.peaks = { dry: trace.before, wet: trace.after }
     this.playhead = null
     this.repaint()
+  }
+
+  /** Replaces the idle chart with a measurement of the clip the idle play button offers,
+   *  so what is drawn before a file is loaded is the audio the page actually plays. */
+  setIdleAudio(dry: readonly Float32Array[], wet: readonly Float32Array[]): void {
+    this.idle = traceOf(dry, wet)
+    if (!this.peaks) this.repaint()
   }
 
   clear(): void {
     this.peaks = null
     this.duration = 0
     this.playhead = null
+    this.repaint()
+  }
+
+  /** Gives the idle example a time scale so its playhead can run before a file is loaded. */
+  setIdleDuration(seconds: number): void {
+    if (this.peaks) return
+    this.duration = Math.max(0, seconds)
     this.repaint()
   }
 
@@ -135,7 +141,7 @@ export class Plot {
     const palette = this.palette()
     this.grid(context, palette)
     if (this.peaks) this.paint(context, palette, this.peaks.dry, this.peaks.wet)
-    else this.paint(context, palette, this.idle.before, this.idle.after)
+    else if (this.idle.before.length > 0) this.paint(context, palette, this.idle.before, this.idle.after)
     this.blit()
   }
 
@@ -216,9 +222,22 @@ export class Plot {
   }
 }
 
-/** Peak magnitude per bucket across every channel. Callers scale both traces by the
- *  input's loudest bucket, so the gap between them is a real level difference rather than
- *  two separately normalised pictures. */
+/** Both envelopes scaled by the input's loudest bucket, so the gap between them is a real
+ *  level difference rather than two separately normalised pictures. */
+function traceOf(dry: readonly Float32Array[], wet: readonly Float32Array[]): IdleTrace {
+  const before = envelope(dry, bucketCount)
+  const after = envelope(wet, bucketCount)
+  let loudest = 0
+  for (const value of before) if (value > loudest) loudest = value
+  const scale = loudest > 0 ? 1 / loudest : 1
+  for (let i = 0; i < bucketCount; i += 1) {
+    before[i] *= scale
+    after[i] *= scale
+  }
+  return { before, after }
+}
+
+/** Peak magnitude per bucket across every channel. */
 function envelope(channels: readonly Float32Array[], buckets: number): Float32Array {
   const peaks = new Float32Array(buckets)
   const length = channels[0]?.length ?? 0

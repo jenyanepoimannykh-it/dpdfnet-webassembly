@@ -16,6 +16,7 @@ const post = (message: WorkerResponse, transfer?: Transferable[]) => scope.postM
 let engine: DereverbEngine | null = null
 let loading: Promise<DereverbEngine> | null = null
 let cancelRequested = false
+let queue: Promise<void> = Promise.resolve()
 
 /** Intra-op threads for the convolutions. Capped low: the graph is small and per-frame,
  *  so beyond a few threads the synchronisation costs more than it saves. */
@@ -43,6 +44,9 @@ async function ensureEngine(): Promise<DereverbEngine> {
   return loading
 }
 
+// Both tools are the same pass. The network takes noise and room out together, which is
+// what the plug-in ships as its de-reverb; the two pages differ in what they say about it
+// and in the material they are pointed at, not in what runs.
 async function process(request: ProcessRequest): Promise<void> {
   const active = await ensureEngine()
   if (cancelRequested) throw new CancelledError()
@@ -96,10 +100,16 @@ scope.addEventListener('message', (event) => {
     ensureEngine().catch((error) => post({ type: 'error', message: describe(error) }))
     return
   }
-  cancelRequested = false
-  process(request).catch((error) => {
-    if (error instanceof CancelledError) post({ type: 'cancelled', job: request.job })
-    else post({ type: 'error', message: describe(error) })
+  // One run at a time. The engine carries recurrent state between frames, and the example
+  // the idle play button renders can still be in flight when a picked file arrives.
+  queue = queue.then(async () => {
+    cancelRequested = false
+    try {
+      await process(request)
+    } catch (error) {
+      if (cancelRequested || error instanceof CancelledError) post({ type: 'cancelled', job: request.job })
+      else post({ type: 'error', message: describe(error) })
+    }
   })
 })
 
